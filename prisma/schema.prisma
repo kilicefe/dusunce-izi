@@ -1,0 +1,883 @@
+// Prisma schema for DÜŞÜNCE İZİ System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  TEACHER
+  ADMIN
+}
+
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+enum ResponseMode {
+  DIRECT_TEXT
+  HANDWRITTEN_IMAGE
+  AUDIO_EXPLANATION
+  MULTIMODAL
+}
+
+enum AttemptStatus {
+  DRAFT
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+  INVALIDATED
+  PROCESSING
+  OCR_PROCESSING
+  TRANSCRIPTION_PROCESSING
+  AI_ANALYZING
+  NEEDS_TEACHER_REVIEW
+  TEACHER_REVIEWED
+  FEEDBACK_READY
+  FAILED
+}
+
+enum JobType {
+  PREPARE_RESPONSE
+  OCR
+  TRANSCRIPTION
+  VISUAL_ANALYSIS
+  MULTIMODAL_AGGREGATION
+  AI_QUALITATIVE_ANALYSIS
+  SCHEMA_REPAIR
+  REANALYSIS
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  RETRY_SCHEDULED
+  CANCELLED
+  PARTIAL
+}
+
+enum TeacherReviewStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  APPROVED_WITH_CHANGES
+  REJECTED
+  NOT_ASSESSABLE
+  REANALYSIS_REQUESTED
+}
+
+enum MisconceptionStatus {
+  CONFIRMED_BY_EVIDENCE
+  POSSIBLE
+  INSUFFICIENT_EVIDENCE
+  NOT_PRESENT
+}
+
+enum CrossModalStatus {
+  CONSISTENT
+  PARTIALLY_CONSISTENT
+  INCONSISTENT
+  SINGLE_MODE_ONLY
+  NOT_ASSESSABLE
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(TEACHER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  classrooms     Classroom[]
+  createdExams   Exam[]
+  teacherReviews TeacherReview[]
+  auditLogs      AuditLog[]
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model School {
+  id        String   @id @default(uuid())
+  name      String
+  code      String?  @unique
+  city      String?
+  district  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classrooms Classroom[]
+}
+
+model Classroom {
+  id           String    @id @default(uuid())
+  teacherId    String
+  schoolId     String?
+  name         String // e.g. "8-A", "10-B Fen"
+  grade        String // e.g. "8", "10"
+  branch       String? // e.g. "A", "B"
+  academicYear String // e.g. "2025-2026"
+  status       String    @default("ACTIVE") // ACTIVE, ARCHIVED
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  teacher User    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  school  School? @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+
+  roster StudentRoster[]
+  exams  Exam[]
+
+  @@index([teacherId])
+}
+
+model StudentRoster {
+  id           String   @id @default(uuid())
+  classroomId  String
+  schoolNumber String
+  firstName    String
+  lastName     String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  classroom Classroom     @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  attempts  ExamAttempt[]
+
+  @@unique([classroomId, schoolNumber])
+  @@index([classroomId])
+}
+
+model Exam {
+  id                        String     @id @default(uuid())
+  teacherId                 String
+  classroomId               String
+  title                     String
+  subject                   String // e.g. "Fen Bilimleri", "Fizik"
+  unit                      String? // e.g. "Madde ve Isı"
+  topic                     String? // e.g. "Isı Alışverişi"
+  description               String?
+  instructions              String?
+  status                    ExamStatus @default(DRAFT)
+  publicToken               String     @unique @default(uuid())
+  shortCode                 String     @unique // e.g. "8fK29d"
+  startDate                 DateTime?
+  endDate                   DateTime?
+  timeLimitMinutes          Int?
+  allowResume               Boolean    @default(true)
+  allowMultipleSubmissions  Boolean    @default(false)
+  showFeedbackAfterApproval Boolean    @default(true)
+  randomizeQuestionOrder    Boolean    @default(false)
+  publishedAt               DateTime?
+  closedAt                  DateTime?
+  archivedAt                DateTime?
+  createdAt                 DateTime   @default(now())
+  updatedAt                 DateTime   @updatedAt
+  deletedAt                 DateTime?
+
+  teacher      User              @relation(fields: [teacherId], references: [id])
+  classroom    Classroom         @relation(fields: [classroomId], references: [id])
+  questions    Question[]
+  attempts     ExamAttempt[]
+  accessTokens ExamAccessToken[]
+
+  @@index([publicToken])
+  @@index([shortCode])
+}
+
+model ExamAccessToken {
+  id        String   @id @default(uuid())
+  examId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model Question {
+  id                    String    @id @default(uuid())
+  examId                String
+  questionOrder         Int
+  title                 String
+  questionText          String
+  imageUrl              String?
+  sourceInfo            String?
+  sourceDetails         String?
+  teacherNotes          String?
+  questionType          String    @default("OPEN_ENDED")
+  multipleChoiceOpts    Json? // Array of options if applicable
+  correctAnswer         String?
+  learningOutcome       String? // Kazanım
+  maximumScore          Int       @default(100)
+  teacherRubric         String?
+  allowedResponseModes  String[] // DIRECT_TEXT, HANDWRITTEN_IMAGE, AUDIO_EXPLANATION, MULTIMODAL
+  targetedSkills        String[] // e.g. ["problemUnderstanding", "causalReasoning"]
+  argumentationRequired Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
+
+  exam             Exam                      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  expectedConcepts QuestionExpectedConcept[]
+  misconceptions   QuestionMisconception[]
+  questionImages   QuestionImage[]
+  rubrics          QuestionRubric[]
+  responses        StudentResponse[]
+
+  @@index([examId, questionOrder])
+}
+
+model QuestionImage {
+  id               String   @id @default(uuid())
+  questionId       String
+  url              String
+  originalFilename String?
+  mimeType         String?
+  fileSize         Int?
+  width            Int?
+  height           Int?
+  caption          String?
+  order            Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model QuestionRubric {
+  id                   String  @id @default(uuid())
+  questionId           String
+  dimension            String  @default("conceptualUnderstanding")
+  rubricTitle          String?
+  level                Int // 0-4
+  levelTitle           String?
+  description          String
+  observableIndicators String?
+  examples             String?
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model QuestionExpectedConcept {
+  id          String  @id @default(uuid())
+  questionId  String
+  conceptName String
+  description String?
+  importance  String  @default("essential") // essential, supporting, optional
+  isEssential Boolean @default(true)
+  order       Int     @default(0)
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model QuestionMisconception {
+  id          String  @id @default(uuid())
+  questionId  String
+  code        String // e.g. "MIS-01"
+  title       String
+  description String
+  remedy      String?
+  order       Int     @default(0)
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model ExamAttempt {
+  id              String        @id @default(uuid())
+  examId          String
+  studentRosterId String
+  attemptToken    String        @unique @default(uuid())
+  status          AttemptStatus @default(DRAFT)
+  startedAt       DateTime      @default(now())
+  submittedAt     DateTime?
+  timeSpentSec    Int           @default(0)
+
+  exam          Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentRoster StudentRoster     @relation(fields: [studentRosterId], references: [id], onDelete: Cascade)
+  responses     StudentResponse[]
+
+  @@unique([examId, studentRosterId])
+  @@index([attemptToken])
+}
+
+model StudentResponse {
+  id         String   @id @default(uuid())
+  attemptId  String
+  questionId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  attempt                    ExamAttempt                  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question                   Question                     @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  textResponse               TextResponse?
+  imageResponses             ImageResponse[]
+  audioResponse              AudioResponse?
+  attachments                ResponseAttachment[]
+  ocrResults                 OCRResult[]
+  transcriptions             TranscriptionResult[]
+  aiAnalyses                 AIAnalysis[]
+  teacherReviews             TeacherReview[]
+  ResponseProcessingJob      ResponseProcessingJob[]
+  VisualAnalysisResult       VisualAnalysisResult[]
+  MultimodalResponseSnapshot MultimodalResponseSnapshot[]
+  ProcessingEvent            ProcessingEvent[]
+
+  @@unique([attemptId, questionId])
+}
+
+model TextResponse {
+  id                String   @id @default(uuid())
+  studentResponseId String   @unique
+  content           String
+  charCount         Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model ImageResponse {
+  id                String   @id @default(uuid())
+  studentResponseId String
+  storageUrl        String
+  thumbnailUrl      String?
+  fileSize          Int
+  mimeType          String
+  orderIndex        Int      @default(0)
+  uploadedAt        DateTime @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model AudioResponse {
+  id                String   @id @default(uuid())
+  studentResponseId String   @unique
+  storageUrl        String
+  durationSeconds   Float
+  fileSize          Int
+  mimeType          String
+  uploadedAt        DateTime @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model ResponseAttachment {
+  id                String   @id @default(uuid())
+  studentResponseId String
+  fileType          String
+  storageUrl        String
+  uploadedAt        DateTime @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model ResponseProcessingJob {
+  id                String    @id @default(uuid())
+  studentResponseId String
+  jobType           JobType
+  status            JobStatus @default(QUEUED)
+  attemptCount      Int       @default(0)
+  maximumAttempts   Int       @default(3)
+  idempotencyKey    String    @unique
+  priority          Int       @default(0)
+  scheduledAt       DateTime  @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  failedAt          DateTime?
+  lastErrorCode     String?
+  lastErrorMessage  String?
+  nextRetryAt       DateTime?
+  provider          String?
+  processingVersion String    @default("1.0.0")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  studentResponse StudentResponse   @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+  events          ProcessingEvent[]
+
+  @@index([studentResponseId])
+  @@index([status])
+}
+
+model OCRResult {
+  id                String   @id @default(uuid())
+  studentResponseId String
+  imageResponseId   String?
+  extractedText     String
+  confidence        Float
+  unreadableRegions String[]
+  uncertainWords    String[]
+  language          String   @default("tr")
+  provider          String   @default("gemini-vision")
+  model             String   @default("gemini-3.6-flash")
+  processingTimeMs  Int      @default(0)
+  correctedText     String?
+  processedAt       DateTime @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model TranscriptionResult {
+  id                String   @id @default(uuid())
+  studentResponseId String
+  audioResponseId   String?
+  transcriptText    String
+  confidence        Float
+  uncertainSegments String[]
+  language          String   @default("tr")
+  durationSeconds   Float    @default(0.0)
+  provider          String   @default("whisper-or-gemini")
+  model             String   @default("gemini-3.6-flash")
+  processingTimeMs  Int      @default(0)
+  correctedText     String?
+  processedAt       DateTime @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model VisualAnalysisResult {
+  id                 String           @id @default(uuid())
+  studentResponseId  String
+  imageResponseId    String?
+  drawingPresent     Boolean          @default(false)
+  scientificElements String[]
+  missingElements    String[]
+  incorrectElements  String[]
+  labelsUsed         Boolean          @default(false)
+  arrowsUsed         Boolean          @default(false)
+  graphUsed          Boolean          @default(false)
+  tableUsed          Boolean          @default(false)
+  symbolicUsed       Boolean          @default(false)
+  modelUsed          Boolean          @default(false)
+  consistency        CrossModalStatus @default(NOT_ASSESSABLE)
+  confidence         Float            @default(0.0)
+  explanation        String?
+  processedAt        DateTime         @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model MultimodalResponseSnapshot {
+  id                String   @id @default(uuid())
+  studentResponseId String
+  attemptId         String
+  questionId        String
+  snapshotVersion   Int      @default(1)
+  typedText         String?
+  ocrText           String?
+  transcriptText    String?
+  visualFindings    Json?
+  anonymizedPayload Json
+  createdAt         DateTime @default(now())
+
+  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+}
+
+model AIAnalysis {
+  id                    String   @id @default(uuid())
+  studentResponseId     String
+  snapshotId            String?
+  promptVersion         String   @default("1.0.0")
+  modelName             String   @default("gemini-3.6-flash")
+  tokenUsage            Int      @default(0)
+  estimatedCost         Float    @default(0.0)
+  confidence            Float    @default(0.0)
+  requiresTeacherReview Boolean  @default(true)
+  reviewReasons         String[]
+  rawOutput             String?
+  repairedOutput        String?
+  analysisJson          Json // Complete structured AI result
+  createdAt             DateTime @default(now())
+
+  studentResponse StudentResponse     @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+  teacherReviews  TeacherReview[]
+  versions        AIAnalysisVersion[]
+}
+
+model AIAnalysisVersion {
+  id            String   @id @default(uuid())
+  aiAnalysisId  String
+  versionNumber Int
+  promptVersion String
+  modelName     String
+  analysisJson  Json
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  aiAnalysis AIAnalysis @relation(fields: [aiAnalysisId], references: [id], onDelete: Cascade)
+}
+
+model TeacherReview {
+  id                String              @id @default(uuid())
+  studentResponseId String
+  aiAnalysisId      String
+  teacherId         String
+  status            TeacherReviewStatus @default(PENDING)
+  approved          Boolean             @default(true)
+  editedJson        Json? // Modified analysis if teacher made changes
+  feedbackText      String?
+  correctionReason  String?
+  reviewedAt        DateTime            @default(now())
+
+  studentResponse StudentResponse       @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+  aiAnalysis      AIAnalysis            @relation(fields: [aiAnalysisId], references: [id], onDelete: Cascade)
+  teacher         User                  @relation(fields: [teacherId], references: [id])
+  changes         TeacherReviewChange[]
+  agreements      AITeacherAgreement[]
+}
+
+model TeacherReviewChange {
+  id              String   @id @default(uuid())
+  teacherReviewId String
+  fieldPath       String
+  oldValue        Json?
+  newValue        Json?
+  reason          String?
+  timestamp       DateTime @default(now())
+
+  teacherReview TeacherReview @relation(fields: [teacherReviewId], references: [id], onDelete: Cascade)
+}
+
+model AITeacherAgreement {
+  id                     String   @id @default(uuid())
+  teacherReviewId        String
+  conceptualLevelDelta   Int      @default(0)
+  misconceptionsApproved String[]
+  misconceptionsRejected String[]
+  hotsDeltas             Json?
+  fieldsChangedCount     Int      @default(0)
+  approvedWithoutChanges Boolean  @default(true)
+  ocrCorrected           Boolean  @default(false)
+  transcriptCorrected    Boolean  @default(false)
+  createdAt              DateTime @default(now())
+
+  teacherReview TeacherReview @relation(fields: [teacherReviewId], references: [id], onDelete: Cascade)
+}
+
+model PromptTemplate {
+  id           String          @id @default(uuid())
+  templateName String          @unique
+  description  String?
+  isDefault    Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  versions     PromptVersion[]
+}
+
+model PromptVersion {
+  id               String   @id @default(uuid())
+  promptTemplateId String
+  version          String // e.g. "1.0.0"
+  systemPrompt     String
+  schemaVersion    String   @default("1.0.0")
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  promptTemplate PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+}
+
+model ProcessingEvent {
+  id                      String   @id @default(uuid())
+  studentResponseId       String
+  responseProcessingJobId String?
+  eventType               String
+  details                 Json?
+  timestamp               DateTime @default(now())
+
+  studentResponse       StudentResponse        @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+  responseProcessingJob ResponseProcessingJob? @relation(fields: [responseProcessingJobId], references: [id], onDelete: SetNull)
+}
+
+model TeacherFeedback {
+  id                String   @id @default(uuid())
+  studentResponseId String
+  strength          String
+  developmentNeed   String
+  promptingQuestion String
+  suggestedActivity String
+  published         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+}
+
+model ConceptCode {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  title       String
+  subject     String
+  description String?
+}
+
+model MisconceptionCode {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  title       String
+  subject     String
+  explanation String
+  remedy      String?
+}
+
+model HotsDimension {
+  id          String @id @default(uuid())
+  name        String @unique // e.g., "causalReasoning", "evidenceUse"
+  labelTr     String // Turkish label e.g., "Neden-Sonuç İlişkisi Kurma"
+  description String
+}
+
+model ArgumentationComponent {
+  id          String @id @default(uuid())
+  name        String @unique // "claim", "evidence", "reasoning", "counterclaim", "rebuttal"
+  labelTr     String
+  description String
+}
+
+model AIUsageLog {
+  id           String   @id @default(uuid())
+  endpoint     String
+  modelName    String
+  promptTokens Int
+  evalTokens   Int
+  latencyMs    Int
+  status       String
+  createdAt    DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  resource  String
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model ConsentRecord {
+  id         String   @id @default(uuid())
+  teacherId  String
+  policyType String
+  accepted   Boolean  @default(true)
+  timestamp  DateTime @default(now())
+}
+
+enum ReportType {
+  EXAM_SUMMARY
+  QUESTION_ANALYSIS
+  CLASSROOM_CONCEPTUAL
+  MISCONCEPTION
+  HOTS
+  ARGUMENTATION
+  REPRESENTATION
+  STUDENT_PROFILE
+  AGREEMENT
+  DATA_QUALITY
+  INSTRUCTIONAL_PLANNING
+}
+
+enum ReportJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum ExportType {
+  TEACHER_FULL_CSV
+  ANONYMIZED_RESEARCH_CSV
+  DATA_DICTIONARY
+}
+
+model AnalyticsSnapshot {
+  id                    String   @id @default(uuid())
+  examId                String
+  snapshotType          String
+  analyticsVersion      String   @default("1.0.0")
+  reviewCutoffTimestamp DateTime
+  includedResponseCount Int      @default(0)
+  excludedResponseCount Int      @default(0)
+  provisionalCount      Int      @default(0)
+  dataQualityWarnings   String[]
+  filtersUsed           Json?
+  generatedBy           String?
+  metrics               Json
+  createdAt             DateTime @default(now())
+
+  @@index([examId])
+}
+
+model ExamAnalyticsSnapshot {
+  id                    String   @id @default(uuid())
+  examId                String
+  totalStudentsRoster   Int      @default(0)
+  startedAttempts       Int      @default(0)
+  submittedAttempts     Int      @default(0)
+  incompleteAttempts    Int      @default(0)
+  expiredAttempts       Int      @default(0)
+  pendingReviewCount    Int      @default(0)
+  reviewedCount         Int      @default(0)
+  notAssessableCount    Int      @default(0)
+  processingFailedCount Int      @default(0)
+  avgCompletionRate     Float    @default(0.0)
+  modeDistribution      Json?
+  reviewedPercentage    Float    @default(0.0)
+  provisionalPercentage Float    @default(0.0)
+  createdAt             DateTime @default(now())
+
+  @@index([examId])
+}
+
+model QuestionAnalyticsSnapshot {
+  id                 String   @id @default(uuid())
+  questionId         String
+  examId             String
+  responseCount      Int      @default(0)
+  reviewedCount      Int      @default(0)
+  notAssessableCount Int      @default(0)
+  levelDistribution  Json?
+  expectedConceptMap Json?
+  misconceptionMap   Json?
+  hotsDistribution   Json?
+  argDistribution    Json?
+  repConsistencyMap  Json?
+  correctionRate     Float    @default(0.0)
+  aiConfidenceAvg    Float    @default(0.0)
+  avgProcessingTime  Int      @default(0)
+  createdAt          DateTime @default(now())
+
+  @@index([questionId])
+  @@index([examId])
+}
+
+model StudentAnalyticsSnapshot {
+  id                      String   @id @default(uuid())
+  studentRosterId         String
+  examId                  String
+  submittedResponses      Int      @default(0)
+  modesUsed               String[]
+  conceptualEvidence      Json?
+  confirmedMisconceptions String[]
+  hotsScores              Json?
+  argScores               Json?
+  repConsistency          String?
+  notAssessableCount      Int      @default(0)
+  createdAt               DateTime @default(now())
+
+  @@index([studentRosterId])
+  @@index([examId])
+}
+
+model InterventionRecommendation {
+  id                       String   @id @default(uuid())
+  examId                   String
+  classroomId              String?
+  scope                    String
+  issue                    String
+  supportingEvidence       String
+  affectedResponseCount    Int      @default(0)
+  affectedStudentIds       String[]
+  confidenceNote           String?
+  suggestedAction          String
+  linkedConceptCodes       String[]
+  linkedMisconceptionCodes String[]
+  createdAt                DateTime @default(now())
+
+  @@index([examId])
+}
+
+model ReportGenerationJob {
+  id                String          @id @default(uuid())
+  teacherId         String
+  examId            String
+  reportType        ReportType
+  status            ReportJobStatus @default(QUEUED)
+  filters           Json?
+  outputStoragePath String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  failedAt          DateTime?
+  errorCode         String?
+  expiresAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([teacherId])
+  @@index([examId])
+}
+
+model ExportJob {
+  id                String          @id @default(uuid())
+  teacherId         String
+  examId            String
+  exportType        ExportType
+  status            ReportJobStatus @default(QUEUED)
+  filters           Json?
+  outputStoragePath String?
+  downloadUrl       String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  failedAt          DateTime?
+  errorCode         String?
+  expiresAt         DateTime?
+  createdAt         DateTime        @default(now())
+
+  @@index([teacherId])
+  @@index([examId])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  teacherId String?
+  examId    String?
+  eventType String
+  details   Json?
+  timestamp DateTime @default(now())
+
+  @@index([examId])
+}
