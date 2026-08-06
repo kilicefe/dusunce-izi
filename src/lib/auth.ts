@@ -18,51 +18,80 @@ declare module 'next-auth' {
   }
 }
 
-const getAuthSecret = () => {
+const isProduction = process.env.NODE_ENV === 'production';
+const testAuthEnabled = !isProduction && process.env.ENABLE_TEST_AUTH === 'true';
+const googleAuthConfigured = Boolean(
+  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+);
+
+function getAuthSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
   if (secret) return secret;
-  if (process.env.NODE_ENV !== 'production') {
+
+  if (!isProduction) {
     return 'dusunce_izi_super_secret_auth_key_2026_dev_spec';
   }
-  return undefined;
-};
+
+  throw new Error(
+    'CRITICAL_AUTH_CONFIG_MISSING: AUTH_SECRET is required in production.'
+  );
+}
+
+if (isProduction && !googleAuthConfigured) {
+  throw new Error(
+    'CRITICAL_AUTH_CONFIG_MISSING: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required in production.'
+  );
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: getAuthSecret(),
   adapter: PrismaAdapter(prisma),
   session: {
     strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30 * 24 * 60 * 60,
   },
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    }),
-    CredentialsProvider({
-      name: 'Credentials',
-      credentials: {
-        email: { label: 'Email', type: 'email' },
-        password: { label: 'Password', type: 'password' },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email) return null;
-        
-        const emailStr = String(credentials.email).toLowerCase().trim();
-        const user = await prisma.user.findUnique({
-          where: { email: emailStr },
-        });
+    ...(googleAuthConfigured
+      ? [
+          GoogleProvider({
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          }),
+        ]
+      : []),
+    ...(testAuthEnabled
+      ? [
+          CredentialsProvider({
+            name: 'Test Credentials',
+            credentials: {
+              email: { label: 'Email', type: 'email' },
+              password: { label: 'Password', type: 'password' },
+            },
+            async authorize(credentials) {
+              const configuredPassword = process.env.E2E_TEST_PASSWORD;
+              if (!configuredPassword || !credentials?.email || !credentials?.password) {
+                return null;
+              }
 
-        if (!user) return null;
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          role: user.role,
-        };
-      },
-    }),
+              if (String(credentials.password) !== configuredPassword) {
+                return null;
+              }
+
+              const email = String(credentials.email).toLowerCase().trim();
+              const user = await prisma.user.findUnique({ where: { email } });
+              if (!user) return null;
+
+              return {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                image: user.image,
+                role: user.role,
+              };
+            },
+          }),
+        ]
+      : []),
   ],
   callbacks: {
     async jwt({ token, user }) {
@@ -94,20 +123,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   cookies: {
     sessionToken: {
-      name: process.env.NODE_ENV === 'production' ? '__Secure-authjs.session-token' : 'authjs.session-token',
+      name: isProduction ? '__Secure-authjs.session-token' : 'authjs.session-token',
       options: {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
       },
     },
   },
 });
 
-/**
- * Server-side authorization helpers
- */
 export async function getCurrentUser() {
   const session = await auth();
   return session?.user || null;
