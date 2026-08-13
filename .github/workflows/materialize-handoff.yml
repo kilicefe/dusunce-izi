@@ -1,0 +1,44 @@
+name: Materialize handoff snapshot
+
+on:
+  push:
+    branches:
+      - handoff/current-2026-08-13
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]' || !contains(github.event.head_commit.message, 'materialize current handoff source')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout handoff branch
+        uses: actions/checkout@v4
+        with:
+          ref: handoff/current-2026-08-13
+          fetch-depth: 0
+
+      - name: Extract authoritative source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f handoff/dusunce-izi-current-handoff-sanitized.tar.xz
+          tar -xJf handoff/dusunce-izi-current-handoff-sanitized.tar.xz -C .
+          rm -f firebase-applet-config.json
+          printf '\nfirebase-applet-config.json\n*.zip\n*.tar.xz\n' >> .gitignore
+          sort -u .gitignore -o .gitignore
+
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to materialize."
+            exit 0
+          fi
+          git commit -m "chore: materialize current handoff source"
+          git push origin HEAD:handoff/current-2026-08-13
