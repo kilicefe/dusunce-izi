@@ -61,7 +61,7 @@ MEDIA_SIGNED_URL_TTL_SECONDS=300
 
 Production'da `ENABLE_TEST_AUTH=true` ayarlamayın ve `E2E_TEST_PASSWORD` tanımlamayın. Kod bu sağlayıcıyı production'da yine de devre dışı bırakır.
 
-Preview deployment'lara production Google secret'larını otomatik kopyalamayın. Preview'da `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` yoksa build tamamlanır fakat Google sağlayıcısı eklenmez ve giriş kapalı kalır. Preview üzerinde giriş testi gerekiyorsa ayrı OAuth istemcisi, preview callback URL'si ve yalnız Preview hedefli Sensitive env değerleri kullanın. `VERCEL_ENV=production` için Google OAuth zorunluluğu değişmez.
+Preview deployment'lara production auth/Google secret'larını otomatik kopyalamayın. Preview'da `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` yoksa build tamamlanır fakat Google sağlayıcısı eklenmez; `AUTH_SECRET` de yoksa her sunucu örneğinde kriptografik rastgele geçici secret kullanılır ve giriş/oturum sürekliliği kapalı kalır. Preview üzerinde giriş testi gerekiyorsa ayrı OAuth istemcisi, preview callback URL'si, kalıcı Preview `AUTH_SECRET` ve yalnız Preview hedefli Sensitive Google env değerleri kullanın. `VERCEL_ENV=production` için kalıcı Auth secret ve Google OAuth zorunluluğu değişmez.
 
 ## 3. Google OAuth
 

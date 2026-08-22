@@ -3,7 +3,11 @@ import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import prisma from '@/lib/prisma';
-import { requiresGoogleAuthConfig } from '@/lib/authEnvironment';
+import {
+  allowsEphemeralPreviewAuthSecret,
+  generateEphemeralPreviewAuthSecret,
+  requiresGoogleAuthConfig,
+} from '@/lib/authEnvironment';
 import { Role } from '@prisma/client';
 
 declare module 'next-auth' {
@@ -32,6 +36,10 @@ function getAuthSecret(): string {
 
   if (!isProduction) {
     return 'dusunce_izi_super_secret_auth_key_2026_dev_spec';
+  }
+
+  if (allowsEphemeralPreviewAuthSecret(process.env, googleAuthConfigured)) {
+    return generateEphemeralPreviewAuthSecret();
   }
 
   throw new Error(

@@ -16,7 +16,7 @@ test.describe('Sprint 6.1 Teacher Classroom & Roster E2E Flow', () => {
     await page.waitForURL('/classrooms/new');
 
     await page.fill('input[placeholder*="8-A"]', 'E2E Test Sınıfı 8-C');
-    await page.getByRole('button', { name: 'Sınıfı Kaydet' }).click();
+    await page.getByRole('button', { name: 'Sınıfı Oluştur' }).click();
 
     await page.waitForURL(/\/classrooms\/.+/);
     await expect(page.locator('h1')).toContainText('E2E Test Sınıfı 8-C');

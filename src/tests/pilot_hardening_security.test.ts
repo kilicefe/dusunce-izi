@@ -14,7 +14,11 @@ import {
   isProcessingWorkerAuthorized,
 } from '../lib/durableProcessingQueue';
 import { selectAudioRecordingMimeType } from '../lib/browserMediaRecorder';
-import { requiresGoogleAuthConfig } from '../lib/authEnvironment';
+import {
+  allowsEphemeralPreviewAuthSecret,
+  generateEphemeralPreviewAuthSecret,
+  requiresGoogleAuthConfig,
+} from '../lib/authEnvironment';
 
 describe('pilot hardening security primitives', () => {
   it('keeps the additive pilot migration free of duplicate enum creation', () => {
@@ -88,6 +92,29 @@ describe('pilot hardening security primitives', () => {
       requiresGoogleAuthConfig({ NODE_ENV: 'production', VERCEL_ENV: 'preview' })
     ).toBe(false);
     expect(requiresGoogleAuthConfig({ NODE_ENV: 'development' })).toBe(false);
+    expect(
+      allowsEphemeralPreviewAuthSecret(
+        { NODE_ENV: 'production', VERCEL_ENV: 'preview' },
+        false
+      )
+    ).toBe(true);
+    expect(
+      allowsEphemeralPreviewAuthSecret(
+        { NODE_ENV: 'production', VERCEL_ENV: 'preview' },
+        true
+      )
+    ).toBe(false);
+    expect(
+      allowsEphemeralPreviewAuthSecret(
+        { NODE_ENV: 'production', VERCEL_ENV: 'production' },
+        false
+      )
+    ).toBe(false);
+
+    const firstPreviewSecret = generateEphemeralPreviewAuthSecret();
+    const secondPreviewSecret = generateEphemeralPreviewAuthSecret();
+    expect(firstPreviewSecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(secondPreviewSecret).not.toBe(firstPreviewSecret);
   });
 
   it('generates high-entropy attempt tokens and stores deterministic hashes', () => {
