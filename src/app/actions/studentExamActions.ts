@@ -12,7 +12,13 @@ import {
   setItem,
   STORAGE_KEYS,
 } from '@/lib/db';
-import { processAttemptResponses, enqueueResponseProcessing } from '@/lib/processingPipeline';
+import { processAttemptResponses } from '@/lib/processingPipeline';
+import { generateAttemptToken, hashAttemptToken } from '@/lib/attemptTokens';
+import {
+  createSignedMediaUrl,
+  deleteStoredMedia,
+  uploadStudentMedia,
+} from '@/lib/mediaStorage';
 import { ExamAttempt, AttemptStatus } from '@/types/database';
 
 const isDbAvailable = () => !!process.env.DATABASE_URL;
@@ -23,7 +29,14 @@ const studentLoginSchema = z.object({
 });
 
 export async function loginStudentForExam(shortCode: string, schoolNumber: string) {
-  const validated = studentLoginSchema.parse({ shortCode, schoolNumber });
+  const validation = studentLoginSchema.safeParse({ shortCode, schoolNumber });
+  if (!validation.success) {
+    return {
+      ok: false as const,
+      error: validation.error.issues[0]?.message || 'Giriş bilgileri geçersiz',
+    };
+  }
+  const validated = validation.data;
 
   if (isDbAvailable()) {
     const exam = await prisma.exam.findFirst({
@@ -40,11 +53,11 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
     });
 
     if (!exam) {
-      throw new Error('NOT_FOUND: Belirtilen koda sahip aktif sınav bulunamadı');
+      return { ok: false as const, error: 'Belirtilen koda sahip aktif sınav bulunamadı' };
     }
 
     if (exam.status !== 'PUBLISHED') {
-      throw new Error('EXAM_NOT_ACTIVE: Bu sınav henüz öğrenci erişimine açılmamıştır');
+      return { ok: false as const, error: 'Bu sınav henüz öğrenci erişimine açılmamıştır' };
     }
 
     const student = exam.classroom.roster.find(
@@ -52,7 +65,10 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
     );
 
     if (!student) {
-      throw new Error('STUDENT_NOT_IN_ROSTER: Bu okul numarasına sahip öğrenci bu sınıfta bulunamadı');
+      return {
+        ok: false as const,
+        error: 'Bu okul numarasına sahip öğrenci bu sınıfta bulunamadı',
+      };
     }
 
     let attempt = await prisma.examAttempt.findUnique({
@@ -64,18 +80,28 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
       },
     });
 
+    const rawAttemptToken = generateAttemptToken();
+    const attemptTokenHash = hashAttemptToken(rawAttemptToken);
+
     if (!attempt) {
       attempt = await prisma.examAttempt.create({
         data: {
           examId: exam.id,
           studentRosterId: student.id,
+          attemptTokenHash,
           status: 'IN_PROGRESS',
         },
+      });
+    } else {
+      attempt = await prisma.examAttempt.update({
+        where: { id: attempt.id },
+        data: { attemptTokenHash },
       });
     }
 
     return {
-      attemptToken: attempt.attemptToken,
+      ok: true as const,
+      attemptToken: rawAttemptToken,
       studentName: `${student.firstName} ${student.lastName}`,
       schoolNumber: student.schoolNumber,
       examTitle: exam.title,
@@ -91,7 +117,7 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
     const exam = exams.find((e) => e.shortCode?.toLowerCase() === validated.shortCode.toLowerCase());
 
     if (!exam) {
-      throw new Error('NOT_FOUND: Belirtilen koda sahip aktif sınav bulunamadı');
+      return { ok: false as const, error: 'Belirtilen koda sahip aktif sınav bulunamadı' };
     }
 
     const mockAttemptId = `att-${exam.id}-${validated.schoolNumber}`;
@@ -118,6 +144,7 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
     }
 
     return {
+      ok: true as const,
       attemptToken: attempt.attemptToken,
       studentName: `Öğrenci #${validated.schoolNumber}`,
       schoolNumber: validated.schoolNumber,
@@ -131,7 +158,7 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
 export async function getStudentAttemptData(attemptToken: string) {
   if (isDbAvailable()) {
     const attempt = await prisma.examAttempt.findUnique({
-      where: { attemptToken },
+      where: { attemptTokenHash: hashAttemptToken(attemptToken) },
       include: {
         studentRoster: true,
         exam: {
@@ -156,7 +183,27 @@ export async function getStudentAttemptData(attemptToken: string) {
 
     if (!attempt) throw new Error('NOT_FOUND: Sınav oturumu bulunamadı');
 
-    return attempt;
+    const { attemptTokenHash: _attemptTokenHash, ...publicAttempt } = attempt;
+    return {
+      ...publicAttempt,
+      responses: await Promise.all(
+        attempt.responses.map(async (response) => ({
+          ...response,
+          imageResponses: await Promise.all(
+            response.imageResponses.map(async (image) => ({
+              ...image,
+              signedUrl: await createSignedMediaUrl(image.storageUrl),
+            }))
+          ),
+          audioResponse: response.audioResponse
+            ? {
+                ...response.audioResponse,
+                signedUrl: await createSignedMediaUrl(response.audioResponse.storageUrl),
+              }
+            : null,
+        }))
+      ),
+    };
   } else {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('CRITICAL_DATABASE_CONFIG_MISSING: DATABASE_URL environment variable is required.');
@@ -194,7 +241,7 @@ export async function saveStudentResponse(payload: {
 }) {
   if (isDbAvailable()) {
     const attempt = await prisma.examAttempt.findUnique({
-      where: { attemptToken: payload.attemptToken },
+      where: { attemptTokenHash: hashAttemptToken(payload.attemptToken) },
     });
 
     if (!attempt) throw new Error('NOT_FOUND: Oturum bulunamadı');
@@ -232,39 +279,132 @@ export async function saveStudentResponse(payload: {
       });
     }
 
-    if (payload.imageUrls && payload.imageUrls.length > 0) {
-      await prisma.imageResponse.deleteMany({
+    if (payload.imageUrls !== undefined) {
+      if (payload.imageUrls.length > 5) throw new Error('TOO_MANY_IMAGES');
+      const currentImages = await prisma.imageResponse.findMany({
         where: { studentResponseId: response.id },
       });
-      for (let i = 0; i < payload.imageUrls.length; i++) {
-        await prisma.imageResponse.create({
-          data: {
-            studentResponseId: response.id,
-            storageUrl: payload.imageUrls[i],
-            mimeType: payload.imageUrls[i].split(';')[0]?.replace('data:', '') || 'image/png',
-            fileSize: payload.imageUrls[i].length,
-            orderIndex: i,
-          },
-        });
+      const currentByReference = new Map(
+        currentImages.map((image) => [image.storageUrl, image])
+      );
+      const uploadedImages: Array<{
+        storageReference: string;
+        mimeType: string;
+        fileSize: number;
+      }> = [];
+
+      try {
+        for (const value of payload.imageUrls) {
+          if (value.startsWith('data:')) {
+            uploadedImages.push(
+              await uploadStudentMedia({
+                attemptId: attempt.id,
+                studentResponseId: response.id,
+                kind: 'image',
+                dataUrl: value,
+              })
+            );
+          } else if (!currentByReference.has(value)) {
+            throw new Error('INVALID_MEDIA_REFERENCE');
+          }
+        }
+
+        const retainedReferences = new Set(
+          payload.imageUrls.filter((value) => currentByReference.has(value))
+        );
+        const uploadedForCreate = [...uploadedImages];
+        await prisma.$transaction([
+          prisma.imageResponse.deleteMany({
+            where: {
+              studentResponseId: response.id,
+              storageUrl: { notIn: [...retainedReferences] },
+            },
+          }),
+          ...payload.imageUrls.map((value, index) => {
+            const current = currentByReference.get(value);
+            if (current) {
+              return prisma.imageResponse.update({
+                where: { id: current.id },
+                data: { orderIndex: index },
+              });
+            }
+
+            const uploaded = uploadedForCreate.shift();
+            if (!uploaded) throw new Error('MEDIA_UPLOAD_RESULT_MISSING');
+            return prisma.imageResponse.create({
+              data: {
+                studentResponseId: response.id,
+                storageUrl: uploaded.storageReference,
+                mimeType: uploaded.mimeType,
+                fileSize: uploaded.fileSize,
+                orderIndex: index,
+              },
+            });
+          }),
+        ]);
+
+        const removedImages = currentImages.filter(
+          (image) => !retainedReferences.has(image.storageUrl)
+        );
+        await Promise.allSettled(
+          removedImages.map((image) => deleteStoredMedia(image.storageUrl))
+        );
+      } catch (error) {
+        await Promise.allSettled(
+          uploadedImages.map((image) => deleteStoredMedia(image.storageReference))
+        );
+        throw error;
       }
     }
 
-    if (payload.audioUrl) {
-      await prisma.audioResponse.upsert({
+    if (payload.audioUrl !== undefined) {
+      const currentAudio = await prisma.audioResponse.findUnique({
         where: { studentResponseId: response.id },
-        create: {
-          studentResponseId: response.id,
-          storageUrl: payload.audioUrl,
-          durationSeconds: payload.audioDuration || 10,
-          fileSize: payload.audioUrl.length,
-          mimeType: 'audio/webm',
-        },
-        update: {
-          storageUrl: payload.audioUrl,
-          durationSeconds: payload.audioDuration || 10,
-          fileSize: payload.audioUrl.length,
-        },
       });
+
+      if (!payload.audioUrl) {
+        await prisma.audioResponse.deleteMany({ where: { studentResponseId: response.id } });
+        if (currentAudio) {
+          await Promise.allSettled([deleteStoredMedia(currentAudio.storageUrl)]);
+        }
+      } else if (payload.audioUrl === currentAudio?.storageUrl) {
+        await prisma.audioResponse.update({
+          where: { studentResponseId: response.id },
+          data: { durationSeconds: payload.audioDuration || currentAudio.durationSeconds },
+        });
+      } else {
+        if (!payload.audioUrl.startsWith('data:')) throw new Error('INVALID_MEDIA_REFERENCE');
+        const uploadedAudio = await uploadStudentMedia({
+          attemptId: attempt.id,
+          studentResponseId: response.id,
+          kind: 'audio',
+          dataUrl: payload.audioUrl,
+        });
+        try {
+          await prisma.audioResponse.upsert({
+            where: { studentResponseId: response.id },
+            create: {
+              studentResponseId: response.id,
+              storageUrl: uploadedAudio.storageReference,
+              durationSeconds: payload.audioDuration || 10,
+              fileSize: uploadedAudio.fileSize,
+              mimeType: uploadedAudio.mimeType,
+            },
+            update: {
+              storageUrl: uploadedAudio.storageReference,
+              durationSeconds: payload.audioDuration || 10,
+              fileSize: uploadedAudio.fileSize,
+              mimeType: uploadedAudio.mimeType,
+            },
+          });
+        } catch (error) {
+          await Promise.allSettled([deleteStoredMedia(uploadedAudio.storageReference)]);
+          throw error;
+        }
+        if (currentAudio) {
+          await Promise.allSettled([deleteStoredMedia(currentAudio.storageUrl)]);
+        }
+      }
     }
 
     return { success: true, responseId: response.id };
@@ -290,27 +430,36 @@ export async function saveStudentResponse(payload: {
 export async function submitStudentExamAttempt(attemptToken: string) {
   if (isDbAvailable()) {
     const attempt = await prisma.examAttempt.findUnique({
-      where: { attemptToken },
+      where: { attemptTokenHash: hashAttemptToken(attemptToken) },
       include: { responses: true },
     });
 
     if (!attempt) throw new Error('NOT_FOUND: Oturum bulunamadı');
 
-    await prisma.examAttempt.update({
-      where: { id: attempt.id },
-      data: {
-        status: 'SUBMITTED',
-        submittedAt: new Date(),
-      },
-    });
+    await prisma.$transaction(async (tx) => {
+      await tx.examAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: 'SUBMITTED',
+          submittedAt: attempt.submittedAt || new Date(),
+        },
+      });
 
-    for (const resp of attempt.responses) {
-      try {
-        enqueueResponseProcessing(resp.id);
-      } catch (err) {
-        console.warn('Pipeline enqueue warn:', err);
+      for (const response of attempt.responses) {
+        const idempotencyKey = `prepare-${response.id}-v1`;
+        await tx.responseProcessingJob.upsert({
+          where: { idempotencyKey },
+          update: {},
+          create: {
+            studentResponseId: response.id,
+            jobType: 'PREPARE_RESPONSE',
+            idempotencyKey,
+            priority: 1,
+            processingVersion: '1.0.0',
+          },
+        });
       }
-    }
+    });
 
     return { success: true };
   } else {

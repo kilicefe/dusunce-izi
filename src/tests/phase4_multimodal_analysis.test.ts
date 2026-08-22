@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseAndValidateAIAnalysis } from '../lib/zodSchemas';
+import {
+  createQualitativeAnalysisResponseJsonSchema,
+  parseAndValidateAIAnalysis,
+} from '../lib/zodSchemas';
 import {
   extractHandwritingOCR,
   transcribeAudio,
@@ -24,6 +27,40 @@ describe('Phase 4 Multimodal Processing & AI Qualitative Analysis Tests', () => 
   beforeEach(() => {
     resetMemoryStore();
     seedInitialData();
+  });
+
+  describe('Gemini structured output schema', () => {
+    it('requires the complete analysis envelope and removes unsupported metadata', () => {
+      const schema = createQualitativeAnalysisResponseJsonSchema() as {
+        required?: string[];
+        properties?: Record<string, unknown>;
+      };
+      const serialized = JSON.stringify(schema);
+
+      expect(schema.required).toEqual(expect.arrayContaining([
+        'conceptualUnderstanding',
+        'higherOrderThinking',
+        'recommendedTeacherFeedback',
+        'analysisConfidence',
+      ]));
+      expect(schema.properties).toHaveProperty('conceptualUnderstanding');
+      expect(serialized).not.toContain('"$schema"');
+      expect(serialized).not.toContain('"default"');
+    });
+
+    it('only asks Gemini for the HOTS dimensions targeted by the question', () => {
+      const schema = createQualitativeAnalysisResponseJsonSchema([
+        'causalReasoning',
+        'problemUnderstanding',
+      ]) as any;
+      const hotsProperties = schema.properties.higherOrderThinking.properties;
+
+      expect(Object.keys(hotsProperties)).toEqual([
+        'problemUnderstanding',
+        'causalReasoning',
+      ]);
+      expect(hotsProperties).not.toHaveProperty('metacognition');
+    });
   });
 
   describe('Zod Schema & Safe Repair Validation', () => {

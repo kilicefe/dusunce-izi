@@ -332,7 +332,7 @@ model ExamAttempt {
   id              String        @id @default(uuid())
   examId          String
   studentRosterId String
-  attemptToken    String        @unique @default(uuid())
+  attemptTokenHash String       @unique
   status          AttemptStatus @default(DRAFT)
   startedAt       DateTime      @default(now())
   submittedAt     DateTime?
@@ -343,7 +343,6 @@ model ExamAttempt {
   responses     StudentResponse[]
 
   @@unique([examId, studentRosterId])
-  @@index([attemptToken])
 }
 
 model StudentResponse {
@@ -432,6 +431,8 @@ model ResponseProcessingJob {
   lastErrorCode     String?
   lastErrorMessage  String?
   nextRetryAt       DateTime?
+  leaseExpiresAt    DateTime?
+  workerId          String?
   provider          String?
   processingVersion String    @default("1.0.0")
   createdAt         DateTime  @default(now())
@@ -439,9 +440,11 @@ model ResponseProcessingJob {
 
   studentResponse StudentResponse   @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
   events          ProcessingEvent[]
+  snapshot        MultimodalResponseSnapshot?
 
   @@index([studentResponseId])
-  @@index([status])
+  @@index([status, scheduledAt])
+  @@index([status, leaseExpiresAt])
 }
 
 model OCRResult {
@@ -505,6 +508,7 @@ model VisualAnalysisResult {
 model MultimodalResponseSnapshot {
   id                String   @id @default(uuid())
   studentResponseId String
+  processingJobId   String?  @unique
   attemptId         String
   questionId        String
   snapshotVersion   Int      @default(1)
@@ -515,7 +519,8 @@ model MultimodalResponseSnapshot {
   anonymizedPayload Json
   createdAt         DateTime @default(now())
 
-  studentResponse StudentResponse @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+  studentResponse StudentResponse       @relation(fields: [studentResponseId], references: [id], onDelete: Cascade)
+  processingJob   ResponseProcessingJob? @relation(fields: [processingJobId], references: [id], onDelete: SetNull)
 }
 
 model AIAnalysis {

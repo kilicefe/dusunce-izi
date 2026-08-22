@@ -1,20 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   FileText,
   Image as ImageIcon,
   Mic,
   Send,
   CheckCircle2,
-  Clock,
-  Sparkles,
   Upload,
   Square,
-  Play,
-  RotateCcw,
 } from 'lucide-react';
 import { saveStudentResponse, submitStudentExamAttempt } from '@/app/actions/studentExamActions';
+import { blobToDataUrl, selectAudioRecordingMimeType } from '@/lib/browserMediaRecorder';
 
 export function StudentExamPortal({
   initialAttempt,
@@ -23,6 +20,7 @@ export function StudentExamPortal({
   initialAttempt: any;
   token: string;
 }) {
+  type MediaItem = { storageValue: string; previewUrl: string };
   const [activeQuestionIdx, setActiveQuestionIdx] = useState(0);
   const [activeMode, setActiveMode] = useState<'text' | 'image' | 'audio'>('text');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,30 +31,57 @@ export function StudentExamPortal({
   const currentQ = questions[activeQuestionIdx];
 
   const [typedTexts, setTypedTexts] = useState<Record<string, string>>({});
-  const [imageLists, setImageLists] = useState<Record<string, string[]>>({});
-  const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
+  const [imageLists, setImageLists] = useState<Record<string, MediaItem[]>>({});
+  const [audioUrls, setAudioUrls] = useState<Record<string, MediaItem>>({});
+  const [audioDurations, setAudioDurations] = useState<Record<string, number>>({});
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [audioError, setAudioError] = useState('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingQuestionIdRef = useRef<string | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     // Populate existing responses
     const initialTyped: Record<string, string> = {};
-    const initialImgs: Record<string, string[]> = {};
-    const initialAuds: Record<string, string> = {};
+    const initialImgs: Record<string, MediaItem[]> = {};
+    const initialAuds: Record<string, MediaItem> = {};
+    const initialAudioDurations: Record<string, number> = {};
 
     for (const r of initialAttempt.responses || []) {
       if (r.textResponse?.content) initialTyped[r.questionId] = r.textResponse.content;
       if (r.imageResponses?.length > 0) {
-        initialImgs[r.questionId] = r.imageResponses.map((i: any) => i.storageUrl || i.url);
+        initialImgs[r.questionId] = r.imageResponses.map((i: any) => ({
+          storageValue: i.storageUrl || i.url,
+          previewUrl: i.signedUrl || i.storageUrl || i.url,
+        }));
       }
       if (r.audioResponse?.storageUrl || r.audioResponse?.url) {
-        initialAuds[r.questionId] = r.audioResponse.storageUrl || r.audioResponse.url;
+        initialAuds[r.questionId] = {
+          storageValue: r.audioResponse.storageUrl || r.audioResponse.url,
+          previewUrl: r.audioResponse.signedUrl || r.audioResponse.storageUrl || r.audioResponse.url,
+        };
+        initialAudioDurations[r.questionId] = r.audioResponse.durationSeconds || 0;
       }
     }
 
     setTypedTexts(initialTyped);
     setImageLists(initialImgs);
     setAudioUrls(initialAuds);
+    setAudioDurations(initialAudioDurations);
   }, [initialAttempt]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
 
   const handleSaveCurrentResponse = async () => {
     if (!currentQ) return;
@@ -65,8 +90,9 @@ export function StudentExamPortal({
         attemptToken: token,
         questionId: currentQ.id,
         typedText: typedTexts[currentQ.id] || '',
-        imageUrls: imageLists[currentQ.id] || [],
-        audioUrl: audioUrls[currentQ.id] || '',
+        imageUrls: (imageLists[currentQ.id] || []).map((item) => item.storageValue),
+        audioUrl: audioUrls[currentQ.id]?.storageValue || '',
+        audioDuration: audioDurations[currentQ.id] || 0,
       });
       alert('Yanıtınız kaydedildi.');
     } catch (err: any) {
@@ -84,26 +110,100 @@ export function StudentExamPortal({
         const currentImages = imageLists[currentQ.id] || [];
         setImageLists({
           ...imageLists,
-          [currentQ.id]: [...currentImages, result],
+          [currentQ.id]: [...currentImages, { storageValue: result, previewUrl: result }],
         });
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleSimulateAudioRecording = () => {
+  const handleAudioRecording = async () => {
     if (!currentQ) return;
     if (isRecording) {
-      setIsRecording(false);
-      // Sample audio data URI simulation
-      const sampleAudioUri =
-        'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAACxAAAAAA==';
-      setAudioUrls({
-        ...audioUrls,
-        [currentQ.id]: sampleAudioUri,
-      });
-    } else {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      return;
+    }
+
+    setAudioError('');
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setAudioError('Bu tarayıcı ses kaydını desteklemiyor. Güncel bir tarayıcı kullanınız.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = selectAudioRecordingMimeType((candidate) =>
+        MediaRecorder.isTypeSupported(candidate)
+      );
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      const questionId = currentQ.id;
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      mediaChunksRef.current = [];
+      recordingQuestionIdRef.current = questionId;
+      recordingStartedAtRef.current = Date.now();
+      setRecordingSeconds(0);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) mediaChunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => setAudioError('Ses kaydı sırasında bir hata oluştu.');
+      recorder.onstop = async () => {
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+        stream.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+
+        const durationSeconds = Math.max(
+          1,
+          Math.round((Date.now() - (recordingStartedAtRef.current || Date.now())) / 1000)
+        );
+        const blob = new Blob(mediaChunksRef.current, {
+          type: recorder.mimeType || mimeType || 'audio/webm',
+        });
+        mediaChunksRef.current = [];
+        if (blob.size === 0) {
+          setAudioError('Ses kaydı boş oluştu. Mikrofonunuzu kontrol edip tekrar deneyiniz.');
+          return;
+        }
+
+        try {
+          const dataUrl = await blobToDataUrl(blob);
+          const recordedQuestionId = recordingQuestionIdRef.current || questionId;
+          setAudioUrls((current) => ({
+            ...current,
+            [recordedQuestionId]: { storageValue: dataUrl, previewUrl: dataUrl },
+          }));
+          setAudioDurations((current) => ({
+            ...current,
+            [recordedQuestionId]: durationSeconds,
+          }));
+        } catch {
+          setAudioError('Ses kaydı okunamadı. Lütfen tekrar deneyiniz.');
+        }
+      };
+
+      recorder.start(250);
       setIsRecording(true);
+      recordingTimerRef.current = setInterval(
+        () => setRecordingSeconds((seconds) => seconds + 1),
+        1000
+      );
+    } catch (error) {
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+      setIsRecording(false);
+      setAudioError(
+        error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'Mikrofon izni verilmedi. Tarayıcı izinlerinden mikrofonu etkinleştiriniz.'
+          : 'Mikrofona erişilemedi. Cihaz bağlantısını ve tarayıcı izinlerini kontrol ediniz.'
+      );
     }
   };
 
@@ -117,8 +217,9 @@ export function StudentExamPortal({
           attemptToken: token,
           questionId: currentQ.id,
           typedText: typedTexts[currentQ.id] || '',
-          imageUrls: imageLists[currentQ.id] || [],
-          audioUrl: audioUrls[currentQ.id] || '',
+          imageUrls: (imageLists[currentQ.id] || []).map((item) => item.storageValue),
+          audioUrl: audioUrls[currentQ.id]?.storageValue || '',
+          audioDuration: audioDurations[currentQ.id] || 0,
         });
       }
 
@@ -262,7 +363,7 @@ export function StudentExamPortal({
                   <p className="font-semibold text-slate-700">Kağıttaki El Yazısı Cevabınızın Fotoğrafını Yükleyin</p>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
                     onChange={handleFileUpload}
                     className="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                   />
@@ -270,10 +371,10 @@ export function StudentExamPortal({
 
                 {(imageLists[currentQ.id] || []).length > 0 && (
                   <div className="flex gap-2 overflow-x-auto pt-2">
-                    {imageLists[currentQ.id].map((imgUrl, idx) => (
+                    {imageLists[currentQ.id].map((image, idx) => (
                       <div key={idx} className="w-20 h-20 rounded-lg overflow-hidden border border-slate-200 relative shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={imgUrl} alt={`Cevap görseli ${idx + 1}`} className="w-full h-full object-cover" />
+                        <img src={image.previewUrl} alt={`Cevap görseli ${idx + 1}`} className="w-full h-full object-cover" />
                       </div>
                     ))}
                   </div>
@@ -285,7 +386,8 @@ export function StudentExamPortal({
               <div className="p-6 border border-slate-200 rounded-xl bg-slate-50 text-center space-y-3 text-xs">
                 <p className="font-semibold text-slate-700">Sözlü Açıklama Kaydı</p>
                 <button
-                  onClick={handleSimulateAudioRecording}
+                  type="button"
+                  onClick={handleAudioRecording}
                   className={`px-5 py-2.5 rounded-xl text-white font-bold transition inline-flex items-center gap-2 ${
                     isRecording ? 'bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'
                   }`}
@@ -301,9 +403,22 @@ export function StudentExamPortal({
                   )}
                 </button>
 
+                {isRecording && (
+                  <div className="font-mono text-red-700" aria-live="polite">
+                    Kayıt süresi: {recordingSeconds} sn
+                  </div>
+                )}
+
+                {audioError && (
+                  <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-red-700" role="alert">
+                    {audioError}
+                  </div>
+                )}
+
                 {audioUrls[currentQ.id] && (
-                  <div className="p-3 bg-white rounded-lg border border-slate-200 inline-block font-mono text-emerald-700 font-bold">
-                    ✓ Ses kaydı başarıyla eklendi
+                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-2 text-emerald-700 font-bold">
+                    <div>✓ Ses kaydı başarıyla eklendi ({audioDurations[currentQ.id] || 0} sn)</div>
+                    <audio controls src={audioUrls[currentQ.id].previewUrl} className="w-full" />
                   </div>
                 )}
               </div>

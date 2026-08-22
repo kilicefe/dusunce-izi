@@ -5,10 +5,11 @@ import { signIn } from 'next-auth/react';
 import { LogIn, School, ShieldCheck } from 'lucide-react';
 
 type Props = {
+  googleAuthConfigured: boolean;
   testAuthEnabled: boolean;
 };
 
-export default function SignInClient({ testAuthEnabled }: Props) {
+export default function SignInClient({ googleAuthConfigured, testAuthEnabled }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -58,21 +59,31 @@ export default function SignInClient({ testAuthEnabled }: Props) {
             </div>
           ) : null}
 
-          <button
-            type="button"
-            onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
-            className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
-          >
-            Google ile giriş yap
-          </button>
+          {googleAuthConfigured ? (
+            <button
+              type="button"
+              onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
+              className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
+            >
+              Google ile giriş yap
+            </button>
+          ) : null}
+
+          {!googleAuthConfigured && !testAuthEnabled ? (
+            <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+              Giriş sağlayıcısı henüz yapılandırılmadı. Sistem yöneticisi Google OAuth veya geliştirme test girişini etkinleştirmelidir.
+            </div>
+          ) : null}
 
           {testAuthEnabled ? (
             <>
-              <div className="my-6 flex items-center gap-3 text-xs uppercase text-slate-500">
-                <span className="h-px flex-1 bg-slate-700" />
-                Test girişi
-                <span className="h-px flex-1 bg-slate-700" />
-              </div>
+              {googleAuthConfigured ? (
+                <div className="my-6 flex items-center gap-3 text-xs uppercase text-slate-500">
+                  <span className="h-px flex-1 bg-slate-700" />
+                  Test girişi
+                  <span className="h-px flex-1 bg-slate-700" />
+                </div>
+              ) : null}
 
               <form onSubmit={handleCredentialsSubmit} className="space-y-4">
                 <div>

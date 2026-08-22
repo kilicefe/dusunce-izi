@@ -1,5 +1,9 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import { parseAndValidateAIAnalysis, QualitativeAnalysisOutput } from './zodSchemas';
+import {
+  createQualitativeAnalysisResponseJsonSchema,
+  parseAndValidateAIAnalysis,
+  QualitativeAnalysisOutput,
+} from './zodSchemas';
 
 export interface OCRInput {
   studentResponseId: string;
@@ -90,7 +94,12 @@ export interface QualitativeAnalysisResult {
 function getGenAIClient(): GoogleGenAI | null {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true') return null;
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('CRITICAL_AI_CONFIG_MISSING: GEMINI_API_KEY is required in production.');
+    }
+    return null;
+  }
   return new GoogleGenAI({
     apiKey,
     httpOptions: {
@@ -157,6 +166,7 @@ Sadece okunan metni yanıt olarak ver.`,
         };
       }
     } catch (e) {
+      if (process.env.NODE_ENV === 'production') throw e;
       console.warn('OCR Gemini call failed, falling back to heuristic mock:', e);
     }
   }
@@ -221,6 +231,7 @@ export async function transcribeAudio(input: TranscriptionInput): Promise<Transc
         };
       }
     } catch (e) {
+      if (process.env.NODE_ENV === 'production') throw e;
       console.warn('Transcription Gemini call failed, falling back to heuristic:', e);
     }
   }
@@ -300,6 +311,7 @@ export async function analyzeVisualRepresentation(input: VisualAnalysisInput): P
         };
       }
     } catch (e) {
+      if (process.env.NODE_ENV === 'production') throw e;
       console.warn('Visual Analysis Gemini call failed, falling back to heuristic:', e);
     }
   }
@@ -384,6 +396,9 @@ ${JSON.stringify(promptPayload, null, 2)}`;
         config: {
           systemInstruction,
           responseMimeType: 'application/json',
+          responseJsonSchema: createQualitativeAnalysisResponseJsonSchema(
+            input.targetedSkills
+          ),
         },
       });
 
@@ -392,6 +407,7 @@ ${JSON.stringify(promptPayload, null, 2)}`;
         tokenUsage = (response.usageMetadata.promptTokenCount || 0) + (response.usageMetadata.candidatesTokenCount || 0);
       }
     } catch (err) {
+      if (process.env.NODE_ENV === 'production') throw err;
       console.warn('Gemini qualitative analysis failed, fallback to structured rule-based response:', err);
     }
   }

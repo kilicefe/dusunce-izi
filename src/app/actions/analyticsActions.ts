@@ -2,7 +2,13 @@
 
 import prisma from '@/lib/prisma';
 import { requireTeacher } from '@/lib/auth';
-import { getExamAnalyticsSummary, exportTeacherDataCSV } from '@/lib/analyticsService';
+import {
+  exportTeacherDataCSV,
+  getExamAnalyticsSummary,
+  isAttemptCompletedForAnalytics,
+  isTeacherApprovedForAnalytics,
+  summarizeApprovedResponsesForCsv,
+} from '@/lib/analyticsService';
 
 const isDbAvailable = () => !!process.env.DATABASE_URL;
 
@@ -30,7 +36,11 @@ export async function getExamAnalyticsData(examId: string) {
             responses: {
               include: {
                 aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1 },
-                teacherReviews: { orderBy: { reviewedAt: 'desc' }, take: 1 },
+                teacherReviews: {
+                  orderBy: { reviewedAt: 'desc' },
+                  take: 1,
+                  include: { aiAnalysis: { select: { analysisJson: true } } },
+                },
               },
             },
           },
@@ -44,7 +54,7 @@ export async function getExamAnalyticsData(examId: string) {
     }
 
     const totalStudents = exam.classroom.roster.length;
-    const submittedAttempts = exam.attempts.filter((a) => a.status === 'SUBMITTED');
+    const submittedAttempts = exam.attempts.filter(isAttemptCompletedForAnalytics);
 
     const levelCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
     const misconceptionCounts: Record<string, { title: string; count: number }> = {};
@@ -54,8 +64,8 @@ export async function getExamAnalyticsData(examId: string) {
     for (const attempt of submittedAttempts) {
       for (const resp of attempt.responses) {
         const review = resp.teacherReviews[0];
-        const ai = resp.aiAnalyses[0];
-        const analysis = (review?.editedJson || ai?.analysisJson) as any;
+        if (!isTeacherApprovedForAnalytics(review)) continue;
+        const analysis = (review?.editedJson || review?.aiAnalysis.analysisJson) as any;
 
         if (analysis) {
           totalReviewed++;
@@ -142,7 +152,11 @@ export async function exportExamCsvData(examId: string) {
             studentRoster: true,
             responses: {
               include: {
-                aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1 },
+                teacherReviews: {
+                  orderBy: { reviewedAt: 'desc' },
+                  take: 1,
+                  include: { aiAnalysis: { select: { analysisJson: true } } },
+                },
               },
             },
           },
@@ -159,12 +173,9 @@ export async function exportExamCsvData(examId: string) {
 
     for (const attempt of exam.attempts) {
       const studentName = `"${attempt.studentRoster.firstName} ${attempt.studentRoster.lastName}"`;
-      const resp = attempt.responses[0];
-      const ai = resp?.aiAnalyses[0]?.analysisJson as any;
-      const score = ai?.conceptualUnderstanding?.overallLevel?.score ?? '-';
-      const miscs = (ai?.conceptualUnderstanding?.misconceptions || [])
-        .map((m: any) => m.code)
-        .join(';');
+      const summary = summarizeApprovedResponsesForCsv(attempt.responses);
+      const score = summary.averageScore;
+      const miscs = summary.misconceptionCodes.join(';');
 
       csv += `${attempt.studentRoster.schoolNumber},${studentName},${attempt.status},${score},"${miscs}"\n`;
     }

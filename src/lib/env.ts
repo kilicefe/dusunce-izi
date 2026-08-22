@@ -11,6 +11,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().optional(),
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SECRET_KEY: z.string().min(32).optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(32).optional(),
+  SUPABASE_MEDIA_BUCKET: z.string().min(1).optional(),
+  PROCESSING_WORKER_SECRET: z.string().min(32).optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 

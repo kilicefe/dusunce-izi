@@ -25,6 +25,10 @@ export default function StudentExamLoginPage({ params }: { params: Promise<{ sho
 
     try {
       const session = await loginStudentForExam(shortCode, schoolNumber);
+      if (!session.ok) {
+        setErrorMsg(session.error);
+        return;
+      }
       router.push(`/exam/${session.shortCode}/take?token=${session.attemptToken}`);
     } catch (err: any) {
       setErrorMsg(err.message?.replace(/^[A-Z_]+:\s*/, '') || 'Giriş yapılamadı.');

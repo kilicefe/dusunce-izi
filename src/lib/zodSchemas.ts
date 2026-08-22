@@ -181,6 +181,81 @@ export const QualitativeAnalysisSchema = z.object({
 
 export type QualitativeAnalysisOutput = z.infer<typeof QualitativeAnalysisSchema>;
 
+const GEMINI_JSON_SCHEMA_KEYWORDS = new Set([
+  '$id',
+  '$defs',
+  'definitions',
+  '$ref',
+  '$anchor',
+  'type',
+  'format',
+  'title',
+  'description',
+  'enum',
+  'items',
+  'prefixItems',
+  'minItems',
+  'maxItems',
+  'minimum',
+  'maximum',
+  'anyOf',
+  'oneOf',
+  'properties',
+  'additionalProperties',
+  'required',
+  'propertyOrdering',
+]);
+
+function sanitizeGeminiJsonSchema(value: unknown, withinProperties = false): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeGeminiJsonSchema(item));
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) => {
+      if (!withinProperties && !GEMINI_JSON_SCHEMA_KEYWORDS.has(key)) return [];
+      const nextValue = key === '$ref' && typeof child === 'string'
+        ? child.replace('#/definitions/', '#/$defs/')
+        : child;
+      return [[
+        key === 'definitions' ? '$defs' : key,
+        sanitizeGeminiJsonSchema(
+          nextValue,
+          key === 'properties' || key === 'definitions' || key === '$defs'
+        ),
+      ]];
+    })
+  );
+}
+
+/**
+ * Gemini structured output accepts a documented subset of JSON Schema.
+ * Zod emits extra metadata such as `$schema` and `default`; removing those
+ * keeps the provider request portable while preserving the validation shape.
+ */
+export function createQualitativeAnalysisResponseJsonSchema(
+  targetedSkills: string[] = []
+): object {
+  const jsonSchema = z.toJSONSchema(QualitativeAnalysisSchema, {
+    target: 'draft-7',
+    reused: 'ref',
+  });
+  const sanitized = sanitizeGeminiJsonSchema(jsonSchema) as Record<string, any>;
+  const hotsProperties = sanitized.properties?.higherOrderThinking?.properties;
+  if (hotsProperties) {
+    const selectedSkills = new Set(targetedSkills);
+    sanitized.properties.higherOrderThinking.properties = Object.fromEntries(
+      Object.entries(hotsProperties).filter(([skill]) => selectedSkills.has(skill))
+    );
+  }
+
+  if (targetedSkills.length === 0 && sanitized.$defs) {
+    delete sanitized.$defs.__schema0;
+  }
+  return sanitized;
+}
+
 /**
  * Validates JSON string or object against QualitativeAnalysisSchema.
  * If invalid, attempts safe repair/fallback normalization.
