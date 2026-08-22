@@ -3,6 +3,7 @@ import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import prisma from '@/lib/prisma';
+import { requiresGoogleAuthConfig } from '@/lib/authEnvironment';
 import { Role } from '@prisma/client';
 
 declare module 'next-auth' {
@@ -23,6 +24,7 @@ const testAuthEnabled = !isProduction && process.env.ENABLE_TEST_AUTH === 'true'
 const googleAuthConfigured = Boolean(
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
 );
+const googleAuthRequired = requiresGoogleAuthConfig(process.env);
 
 function getAuthSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
@@ -37,7 +39,7 @@ function getAuthSecret(): string {
   );
 }
 
-if (isProduction && !googleAuthConfigured) {
+if (googleAuthRequired && !googleAuthConfigured) {
   throw new Error(
     'CRITICAL_AUTH_CONFIG_MISSING: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required in production.'
   );

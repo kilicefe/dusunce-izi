@@ -22,6 +22,7 @@ Vercel Hobby planı dakikalık Cron kabul etmez. Bu nedenle `vercel.json` yalnı
    - `20260806000000_init`
    - `20260814000000_pilot_media_tokens_queue`
    - `20260814170000_secure_public_schema_rls`
+   - Son migration Supabase'in `anon` ve `authenticated` rollerini yalnız mevcutlarsa hedefler. Böylece aynı migration standart PostgreSQL doğrulama ortamında rol oluşturma yan etkisi olmadan çalışır; Supabase'te browser-role grant'leri kaldırılmaya devam eder.
 3. `pilot-media` kovasını private oluşturun. `anon` veya `authenticated` için upload/read policy eklemeyin.
 4. Scheduler için `pg_net` ve `pg_cron` uzantılarını etkinleştirin. Canlı ortamda bu adım Supabase migration geçmişine `enable_processing_scheduler_extensions` olarak yazılmıştır.
 5. Security Advisor'ı çalıştırın. Sunucuya özel 50 tabloda `rls_enabled_no_policy` bilgi kaydı beklenir; kritik/yüksek uyarı kabul edilmez.
@@ -59,6 +60,8 @@ MEDIA_SIGNED_URL_TTL_SECONDS=300
 `AUTH_SECRET`, Google secret, Gemini anahtarı, Supabase service-role anahtarı ve worker secret Vercel'de **Sensitive** tutulur. `PROCESSING_WORKER_SECRET` ile `CRON_SECRET` aynı en az 32 karakterlik rastgele değer olmalıdır. Hiçbiri `NEXT_PUBLIC_` öneki taşımamalıdır.
 
 Production'da `ENABLE_TEST_AUTH=true` ayarlamayın ve `E2E_TEST_PASSWORD` tanımlamayın. Kod bu sağlayıcıyı production'da yine de devre dışı bırakır.
+
+Preview deployment'lara production Google secret'larını otomatik kopyalamayın. Preview'da `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` yoksa build tamamlanır fakat Google sağlayıcısı eklenmez ve giriş kapalı kalır. Preview üzerinde giriş testi gerekiyorsa ayrı OAuth istemcisi, preview callback URL'si ve yalnız Preview hedefli Sensitive env değerleri kullanın. `VERCEL_ENV=production` için Google OAuth zorunluluğu değişmez.
 
 ## 3. Google OAuth
 

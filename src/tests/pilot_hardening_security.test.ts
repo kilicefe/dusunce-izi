@@ -14,6 +14,7 @@ import {
   isProcessingWorkerAuthorized,
 } from '../lib/durableProcessingQueue';
 import { selectAudioRecordingMimeType } from '../lib/browserMediaRecorder';
+import { requiresGoogleAuthConfig } from '../lib/authEnvironment';
 
 describe('pilot hardening security primitives', () => {
   it('keeps the additive pilot migration free of duplicate enum creation', () => {
@@ -53,15 +54,40 @@ describe('pilot hardening security primitives', () => {
         '_prisma_migrations',
       ])
     );
-    for (const table of protectedTables) {
-      expect(rlsMigration).toContain(
-        `REVOKE ALL PRIVILEGES ON TABLE public."${table}" FROM anon, authenticated;`
-      );
-    }
+    expect(rlsMigration).toContain(
+      "FOREACH target_role IN ARRAY ARRAY['anon', 'authenticated']"
+    );
+    expect(rlsMigration).toContain(
+      'IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = target_role)'
+    );
+    const protectedTableList = rlsMigration.match(
+      /protected_tables constant text\[\] := ARRAY\[([\s\S]*?)\];/
+    );
+    expect(protectedTableList).not.toBeNull();
+    const revokedTables = Array.from(
+      protectedTableList![1].matchAll(/'([^']+)'/g),
+      (match) => match[1]
+    );
+    expect(revokedTables).toEqual(protectedTables);
+    expect(rlsMigration).toContain(
+      'REVOKE ALL PRIVILEGES ON TABLE public.%I FROM %I'
+    );
+    expect(rlsMigration).not.toMatch(/FROM anon, authenticated/i);
     expect(rlsMigration).not.toMatch(/CREATE POLICY/i);
     expect(rlsMigration).toContain(
-      'REVOKE EXECUTE ON FUNCTION public.yeni_kullanici_profili() FROM PUBLIC, anon, authenticated'
+      'REVOKE EXECUTE ON FUNCTION public.yeni_kullanici_profili() FROM PUBLIC'
     );
+  });
+
+  it('requires Google OAuth for real production but keeps previews fail-closed', () => {
+    expect(requiresGoogleAuthConfig({ NODE_ENV: 'production' })).toBe(true);
+    expect(
+      requiresGoogleAuthConfig({ NODE_ENV: 'production', VERCEL_ENV: 'production' })
+    ).toBe(true);
+    expect(
+      requiresGoogleAuthConfig({ NODE_ENV: 'production', VERCEL_ENV: 'preview' })
+    ).toBe(false);
+    expect(requiresGoogleAuthConfig({ NODE_ENV: 'development' })).toBe(false);
   });
 
   it('generates high-entropy attempt tokens and stores deterministic hashes', () => {

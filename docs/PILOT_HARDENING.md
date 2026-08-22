@@ -9,7 +9,7 @@ Bu dal, gerçek pilot öncesi kimlik doğrulama, PostgreSQL doğrulaması, öğr
 - Parolasız e-posta tabanlı test girişi kaldırıldı.
 - Credentials sağlayıcısı yalnızca `ENABLE_TEST_AUTH=true` ve production dışı ortamlarda etkinleşir.
 - Test girişi için `E2E_TEST_PASSWORD` zorunludur.
-- Production ortamında Auth secret veya Google OAuth yapılandırması eksikse uygulama açık hata verir.
+- Gerçek production ortamında Auth secret veya Google OAuth yapılandırması eksikse uygulama açık hata verir. Vercel Preview, Google secret'ları paylaşılmadığında sağlayıcı eklemeden kapalı davranır; test credentials production build'inde yine açılamaz.
 - Test kullanıcı arayüzü production ortamında gösterilmez.
 - GitHub Actions, PostgreSQL 16 üzerinde migration, sentetik seed, type-check, Vitest, production build ve Playwright çalıştırır.
 - `package-lock.json` eklendi; PR'daki `npm ci` adımı artık kilitli ve tekrar üretilebilir kurulum yapar.
@@ -84,7 +84,7 @@ Queue locking ve transaction yaklaşımı için: [PostgreSQL 16 SELECT / SKIP LO
    - `npx prisma generate`
    - `npx prisma migrate deploy`
    - İkinci migration, ilk migration'da eksik olan sınav/yanıt/işleme tablolarını ve `attemptTokenHash`, queue lease/index ve idempotent snapshot alanlarını oluşturur. İlk migration'daki enum'ları yeniden oluşturmamalıdır; hedefli test bu zinciri korur.
-   - Üçüncü migration (`20260814170000_secure_public_schema_rls`) 50 Prisma/pilot tablosunda RLS'yi etkinleştirir, `anon`/`authenticated` tablo grant'lerini kaldırır ve eski profil trigger fonksiyonunun public RPC olarak çağrılmasını engeller.
+   - Üçüncü migration (`20260814170000_secure_public_schema_rls`) 50 Prisma/pilot tablosunda RLS'yi etkinleştirir, mevcutsa `anon`/`authenticated` tablo grant'lerini kaldırır ve eski profil trigger fonksiyonunun public RPC olarak çağrılmasını engeller. Rol varlığı `pg_roles` üzerinden koşullu denetlendiği için migration Supabase rollerini içermeyen standart PostgreSQL 16 CI üzerinde de uygulanır; roller yapay olarak oluşturulmaz.
    - Supabase'te migration rolü `postgres` olmalıdır. Runtime `DATABASE_URL` için kullanılan `dusunce_izi_app` rolü DDL çalıştırmaz; yalnız sunucu bağlantısı için `BYPASSRLS` alır.
 
 5. **Supabase Data API yüzeyini kapatma**
@@ -178,7 +178,7 @@ ORDER BY "status";
 - Backfill yalnız Base64 data URL'lerini otomatik taşır. `blob:` veya yerel dosya yolu referansları kaynak dosyaya erişim gerektirdiği için manuel kurtarma ister.
 - Dosya türü/boyut kontrolü vardır; malware taraması, içerik moderasyonu ve EXIF temizleme henüz yoktur. Pilot veri politikasına göre bunlar ayrıca değerlendirilmelidir.
 - Dependency release gate'i tamamlandı: Next.js 16.3.1, React 19.2.8, Auth.js beta.32 ve Playwright 1.62.1'e yükseltildi; `npm audit` sıfır bulgu ve production build başarıyla tamamlandı. Yeni major sürüm nedeniyle pilotta hata oranı ve Auth callback logları yakından izlenmelidir.
-- Production build gerçek `GOOGLE_CLIENT_ID` ve `GOOGLE_CLIENT_SECRET` olmadan bilerek başarısız olur. Canlı Vercel ortamında gerçek anahtarlar ve `https://dusunce-izi.vercel.app/api/auth/callback/google` callback'i yapılandırıldı; yerel test credentials sağlayıcısı production'da açılamaz. OAuth uygulaması External + Testing durumunda kaldığı için yalnız test kullanıcısı eklenen öğretmenler giriş yapabilir; pilot genişlemeden önce yayınlama/doğrulama süreci tamamlanmalıdır.
+- `VERCEL_ENV=production` veya Vercel dışı production build gerçek `GOOGLE_CLIENT_ID` ve `GOOGLE_CLIENT_SECRET` olmadan bilerek başarısız olur. Vercel Preview bu secret'ları devralmıyorsa build geçer ancak Google sağlayıcısı hiç eklenmez ve giriş kapalı kalır; preview üzerinde OAuth smoke testi isteniyorsa ayrı Preview istemcisi/callback'i ve Preview-scoped Sensitive env tanımlanmalıdır. Canlı ortamda gerçek anahtarlar ve `https://dusunce-izi.vercel.app/api/auth/callback/google` callback'i yapılandırıldı; yerel test credentials sağlayıcısı production'da açılamaz. OAuth uygulaması External + Testing durumunda kaldığı için yalnız test kullanıcısı eklenen öğretmenler giriş yapabilir; pilot genişlemeden önce yayınlama/doğrulama süreci tamamlanmalıdır.
 - `GEMINI_API_KEY` olmadan uygulama geliştirme fallback'iyle sınırlı analiz üretebilir fakat readiness 503 kalır; pilot kabulü gerçek model anahtarı ve maliyet/kota alarmlarıyla yapılmalıdır.
 - Öğrenci portalındaki ses düğmesi gerçek mikrofon `MediaRecorder` akışına geçirildi; desteklenen WebM/Opus, WebM veya MP4 türü seçilir, süre kaydedilir ve stream/track'ler temizlenir. Mikrofon erişimi hassas kullanıcı izni gerektirdiği için gerçek cihaz kaydı otomasyonda açılmadı; pilot cihaz/tarayıcı matrisinde izin reddi, gerçek kayıt ve transkripsiyon kabul testi sürmektedir.
 - Çok sayıda HOTS becerisinin aynı soruda hedeflendiği uç durum Gemini structured-output şema karmaşıklık sınırına yaklaşabilir. Pilot soru şablonlarında beceri sayısı sınırlandırılmalı ve desteklenen azami seçim için sağlayıcı regresyon testi eklenmelidir.
