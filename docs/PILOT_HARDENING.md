@@ -54,6 +54,14 @@ Supabase private bucket ve service-key davranışı için: [Storage Buckets](htt
 - “İncelendi” sayısı ve CSV yalnız öğretmenin onayladığı analizleri kullanır. CSV çok sorulu denemelerde bütün onaylı yanıtların ortalamasını alır ve yalnız gerçekten saptanan kavram yanılgılarını dışa aktarır.
 - Bir denemedeki bütün yanıtlar onaylandığında durum `TEACHER_REVIEWED` olur.
 
+### Öğretmen arayüzü ve veri görünürlüğü
+
+- `/dashboard` ve bütün `/classrooms` rotaları aynı öğretmen kabuğunu kullanır. Logo ana sayfaya döner; sınıf liste, yeni sınıf ve sınıf detay ekranlarında ana menü kaybolmaz.
+- Ana menü aktif rotayı `aria-current="page"` ile belirtir. Mobilde öğretmen için üç kompakt sekme, yöneticide dört sekme tek satırda gösterilir.
+- Oturumu olmayan kullanıcı korumalı öğretmen rotasına doğrudan geldiğinde genel React hata ekranına düşmek yerine `/sign-in` sayfasına yönlendirilir.
+- Sınıf, öğrenci, sınav, attempt, yanıt ve öğretmen incelemesi mutasyonları ilgili dashboard/liste/detay rotalarını `revalidatePath` ile yeniler. Kullanıcı geri döndüğünde eski sınıf, öğrenci veya yanıt sayaçlarını görmez.
+- Öğretmen inceleme kuyruğu `DRAFT` ve `IN_PROGRESS` denemelerdeki taslak öğrenci yanıtlarını göstermez. Yalnız teslim edilmiş veya işleme/inceleme aşamasına geçmiş denemeler görünür.
+
 Queue locking ve transaction yaklaşımı için: [PostgreSQL 16 SELECT / SKIP LOCKED](https://www.postgresql.org/docs/16/sql-select.html), [Prisma raw queries and transactions](https://www.prisma.io/docs/orm/prisma-client/using-raw-sql/raw-queries).
 
 ## Migration ve deployment sırası
@@ -86,6 +94,7 @@ Queue locking ve transaction yaklaşımı için: [PostgreSQL 16 SELECT / SKIP LO
    - İkinci migration, ilk migration'da eksik olan sınav/yanıt/işleme tablolarını ve `attemptTokenHash`, queue lease/index ve idempotent snapshot alanlarını oluşturur. İlk migration'daki enum'ları yeniden oluşturmamalıdır; hedefli test bu zinciri korur.
    - Üçüncü migration (`20260814170000_secure_public_schema_rls`) 50 Prisma/pilot tablosunda RLS'yi etkinleştirir, mevcutsa `anon`/`authenticated` tablo grant'lerini kaldırır ve eski profil trigger fonksiyonunun public RPC olarak çağrılmasını engeller. Rol varlığı `pg_roles` üzerinden koşullu denetlendiği için migration Supabase rollerini içermeyen standart PostgreSQL 16 CI üzerinde de uygulanır; roller yapay olarak oluşturulmaz.
    - Supabase'te migration rolü `postgres` olmalıdır. Runtime `DATABASE_URL` için kullanılan `dusunce_izi_app` rolü DDL çalıştırmaz; yalnız sunucu bağlantısı için `BYPASSRLS` alır.
+   - Öğretmen arayüzü/route-shell düzeltmesi yeni bir veritabanı migration'ı gerektirmez. Mevcut migration zinciri değişmeden uygulama deployment'ı yapılır.
 
 5. **Supabase Data API yüzeyini kapatma**
    - Prisma tabloları `public` şemasında kaldığı için Supabase Data API bunları otomatik olarak görür. Pilot trafiğini açmadan önce bütün uygulama tablolarında RLS'yi etkinleştirin.
@@ -113,6 +122,9 @@ Queue locking ve transaction yaklaşımı için: [PostgreSQL 16 SELECT / SKIP LO
    - Yeni bir öğrenci girişinden sonra DB'de yalnızca 64 karakterlik `attemptTokenHash` bulunduğunu doğrulayın.
    - Görsel ve ses yanıtı yükleyip DB'de `supabase://` referansı, tarayıcıda süreli signed URL oluştuğunu doğrulayın.
    - Bir attempt submit edin; işin `QUEUED -> RUNNING -> COMPLETED` ilerlediğini ve teacher review kaydı oluştuğunu doğrulayın.
+   - Öğretmen hesabıyla `/dashboard -> /classrooms -> /classrooms/new -> /classrooms/{id}` akışını izleyin; her adımda logo ve ana menünün görünür, aktif menü işaretinin doğru olduğunu doğrulayın.
+   - 390×844 mobil görünümde menünün tek satırda kaldığını, form alanlarının taşmadığını ve logo ile dashboard'a dönülebildiğini doğrulayın.
+   - Teslim edilmemiş (`IN_PROGRESS`) bir attempt'in öğretmen inceleme kuyruğunda görünmediğini; submit sonrası sayfa yenilenmeden doğru sayaçların geldiğini doğrulayın.
    - Önerilen salt-okunur kontroller:
 
 ```sql
@@ -165,6 +177,8 @@ ORDER BY "status";
 - Gemini structured-output şemasının zorunlu analiz zarfını koruması, hedeflenmeyen HOTS alanlarını göndermemesi ve sağlayıcıda gerçek istekle kabul edilmesi.
 - İşleme statüsü değişmiş teslimlerin analitikte tamamlanmış sayılması, yalnız öğretmen onaylarının incelenmiş sayılması ve çok sorulu CSV ortalaması.
 - Readiness'in eksik/public Supabase medya kovasını reddetmesi.
+- Sınıf alt rotalarında öğretmen kabuğunun korunması, mobil menünün erişilebilir adları ve oturumsuz doğrudan rota yönlendirmesi için Playwright regresyonları.
+- Öğrenci sınava başladıktan sonra öğretmen rotalarının yenilenmesi ve `IN_PROGRESS` yanıtların inceleme kuyruğundan dışlanması için hedefli Vitest regresyonları.
 
 ## Kalan riskler ve operasyonel gereksinimler
 
@@ -182,7 +196,7 @@ ORDER BY "status";
 - `GEMINI_API_KEY` olmadan uygulama geliştirme fallback'iyle sınırlı analiz üretebilir fakat readiness 503 kalır; pilot kabulü gerçek model anahtarı ve maliyet/kota alarmlarıyla yapılmalıdır.
 - Öğrenci portalındaki ses düğmesi gerçek mikrofon `MediaRecorder` akışına geçirildi; desteklenen WebM/Opus, WebM veya MP4 türü seçilir, süre kaydedilir ve stream/track'ler temizlenir. Mikrofon erişimi hassas kullanıcı izni gerektirdiği için gerçek cihaz kaydı otomasyonda açılmadı; pilot cihaz/tarayıcı matrisinde izin reddi, gerçek kayıt ve transkripsiyon kabul testi sürmektedir.
 - Çok sayıda HOTS becerisinin aynı soruda hedeflendiği uç durum Gemini structured-output şema karmaşıklık sınırına yaklaşabilir. Pilot soru şablonlarında beceri sayısı sınırlandırılmalı ve desteklenen azami seçim için sağlayıcı regresyon testi eklenmelidir.
-- Oturumsuz kullanıcı korumalı veriye erişemez; ancak doğrudan bazı server-component URL'lerine gidildiğinde giriş sayfasına yönlendirme yerine `UNAUTHORIZED` hata ekranı gösterilir. Bu güvenlik açığı değildir fakat pilot kullanıcı deneyimi için merkezi redirect/error-boundary iyileştirmesi gerekir.
+- Öğretmen kabuğuyla sarılan dashboard ve sınıf rotalarında oturumsuz doğrudan erişim `/sign-in` sayfasına yönlendirilir. `/admin` gibi kabuğu ayrı kalan korumalı rotalarda aynı davranış ayrıca regresyon testiyle izlenmelidir.
 - EduAnalytics local doğrulaması Google AI Studio'daki mevcut `eduanaltc360` anahtarını yalnız process environment içinde kullandı; yeni `dusunce-izi-backend` anahtar isteği Google tarafından `suspicious request` olarak reddedildi. Pilot deployment öncesinde uygulamaya özel anahtar oluşturulmalı veya mevcut anahtarın diğer tüketicileri envanterlenip kontrollü rotasyon yapılmalı; anahtar hiçbir kaynak dosyasına yazılmamalıdır.
 - Production dışı bellek adaptörleri geliştirici testleri için kalır. Pilot kabulü yalnız gerçek PostgreSQL CI ve production-benzeri ortam üzerinden yapılmalıdır.
 - Eski prototip tabloları (`profiles`, `siniflar`, `sinavlar`, `sorular`, `cevaplar` ve ilişkili tablo) mevcut Supabase RLS politikalarını kullanır. Performance Advisor bu yüzeyde `auth_rls_initplan`, çoklu permissive policy ve eksik FK index uyarıları verir; Prisma pilot tablolarından ayrı bir politika/performance bakım turu gereklidir.

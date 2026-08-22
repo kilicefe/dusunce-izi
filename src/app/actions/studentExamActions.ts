@@ -20,8 +20,16 @@ import {
   uploadStudentMedia,
 } from '@/lib/mediaStorage';
 import { ExamAttempt, AttemptStatus } from '@/types/database';
+import { revalidatePath } from 'next/cache';
 
 const isDbAvailable = () => !!process.env.DATABASE_URL;
+
+function revalidateTeacherExamViews(examId: string) {
+  revalidatePath('/dashboard/exams');
+  revalidatePath(`/dashboard/exams/${examId}`);
+  revalidatePath(`/dashboard/exams/${examId}/review`);
+  revalidatePath(`/dashboard/exams/${examId}/analytics`);
+}
 
 const studentLoginSchema = z.object({
   shortCode: z.string().min(1, 'Sınav kodu girilmelidir'),
@@ -98,6 +106,8 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
         data: { attemptTokenHash },
       });
     }
+
+    revalidateTeacherExamViews(exam.id);
 
     return {
       ok: true as const,
@@ -407,6 +417,7 @@ export async function saveStudentResponse(payload: {
       }
     }
 
+    revalidateTeacherExamViews(attempt.examId);
     return { success: true, responseId: response.id };
   } else {
     if (process.env.NODE_ENV === 'production') {
@@ -460,6 +471,8 @@ export async function submitStudentExamAttempt(attemptToken: string) {
         });
       }
     });
+
+    revalidateTeacherExamViews(attempt.examId);
 
     return { success: true };
   } else {

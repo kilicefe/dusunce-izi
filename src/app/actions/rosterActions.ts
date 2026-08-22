@@ -5,6 +5,13 @@ import prisma from '@/lib/prisma';
 import { requireTeacher } from '@/lib/auth';
 import { createAuditLog } from '@/lib/auditLogger';
 import { Role } from '@prisma/client';
+import { revalidatePath } from 'next/cache';
+
+function revalidateRosterViews(classroomId: string) {
+  revalidatePath('/dashboard');
+  revalidatePath('/classrooms');
+  revalidatePath(`/classrooms/${classroomId}`);
+}
 
 const studentSchema = z.object({
   classroomId: z.string().min(1, 'Sınıf seçilmelidir'),
@@ -57,6 +64,8 @@ export async function addStudentToRoster(data: z.infer<typeof studentSchema>) {
     entityId: student.id,
     details: { schoolNumber: student.schoolNumber, classroomId: student.classroomId },
   });
+
+  revalidateRosterViews(validated.classroomId);
 
   return student;
 }
@@ -187,6 +196,8 @@ export async function previewAndImportCSV(classroomId: string, csvContent: strin
       entityId: classroomId,
       details: { importedCount: validRowsToInsert.length },
     });
+
+    revalidateRosterViews(classroomId);
   }
 
   return {

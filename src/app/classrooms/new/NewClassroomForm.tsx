@@ -72,7 +72,7 @@ export default function NewClassroomForm() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Sınıf Düzeyi (Grade)
+                Sınıf Düzeyi
               </label>
               <select
                 value={grade}
@@ -92,7 +92,7 @@ export default function NewClassroomForm() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Şube (Branch)
+                Şube
               </label>
               <input
                 type="text"

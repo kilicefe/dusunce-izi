@@ -103,7 +103,9 @@ export function ReviewWorkspace({
           <ArrowLeft className="w-4 h-4" /> Sınav Detayına Dön
         </Link>
         <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
-          Öğrenci Yanıtı: {selectedIndex + 1} / {responses.length || 1}
+          {responses.length === 0
+            ? 'İnceleme kuyruğu boş'
+            : `Öğrenci Yanıtı: ${selectedIndex + 1} / ${responses.length}`}
         </span>
       </div>
 

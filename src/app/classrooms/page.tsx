@@ -44,7 +44,7 @@ export default async function ClassroomsListPage() {
               <div key={c.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition">
                 <div>
                   <h3 className="font-bold text-slate-900 text-base">{c.name}</h3>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
                     <span>{c.grade}. Sınıf {c.branch ? `(${c.branch})` : ''}</span>
                     <span>•</span>
                     <span>Akademik Yıl: {c.academicYear}</span>

@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma';
 import { requireTeacher } from '@/lib/auth';
 import { createAuditLog } from '@/lib/auditLogger';
 import { Role } from '@prisma/client';
+import { revalidatePath } from 'next/cache';
 
 const classroomSchema = z.object({
   name: z.string().min(1, 'Sınıf adı zorunludur'),
@@ -37,6 +38,9 @@ export async function createClassroom(formData: z.infer<typeof classroomSchema>)
     entityId: classroom.id,
     details: { name: classroom.name, grade: classroom.grade },
   });
+
+  revalidatePath('/dashboard');
+  revalidatePath('/classrooms');
 
   return classroom;
 }
@@ -109,6 +113,10 @@ export async function updateClassroom(id: string, formData: Partial<z.infer<type
     details: { changes: formData },
   });
 
+  revalidatePath('/dashboard');
+  revalidatePath('/classrooms');
+  revalidatePath(`/classrooms/${id}`);
+
   return updated;
 }
 
@@ -136,6 +144,10 @@ export async function archiveClassroom(id: string) {
     entityId: archived.id,
   });
 
+  revalidatePath('/dashboard');
+  revalidatePath('/classrooms');
+  revalidatePath(`/classrooms/${id}`);
+
   return archived;
 }
 
@@ -162,6 +174,10 @@ export async function restoreClassroom(id: string) {
     entityType: 'CLASSROOM',
     entityId: restored.id,
   });
+
+  revalidatePath('/dashboard');
+  revalidatePath('/classrooms');
+  revalidatePath(`/classrooms/${id}`);
 
   return restored;
 }

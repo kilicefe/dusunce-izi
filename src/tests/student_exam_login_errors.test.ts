@@ -10,8 +10,10 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
   },
 }));
+const revalidatePathMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../lib/prisma', () => ({ default: prismaMock }));
+vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
 import { loginStudentForExam } from '../app/actions/studentExamActions';
 
@@ -44,5 +46,30 @@ describe('student exam login errors', () => {
       error: 'Bu okul numarasına sahip öğrenci bu sınıfta bulunamadı',
     });
     expect(prismaMock.examAttempt.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('refreshes teacher views after a student starts an exam', async () => {
+    prismaMock.exam.findFirst.mockResolvedValue({
+      id: 'exam-1',
+      status: 'PUBLISHED',
+      shortCode: 'RYB5N9',
+      title: 'Fen Sınavı',
+      subject: 'Fen Bilimleri',
+      classroom: {
+        roster: [
+          { id: 'student-1', schoolNumber: '253', firstName: 'Deniz', lastName: 'Örnek' },
+        ],
+      },
+    });
+    prismaMock.examAttempt.findUnique.mockResolvedValue(null);
+    prismaMock.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+
+    await expect(loginStudentForExam('RYB5N9', '253')).resolves.toMatchObject({
+      ok: true,
+      studentName: 'Deniz Örnek',
+    });
+
+    expect(revalidatePathMock).toHaveBeenCalledWith('/dashboard/exams');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/dashboard/exams/exam-1/review');
   });
 });

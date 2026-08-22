@@ -1,7 +1,8 @@
 'use server';
 
 import { randomUUID } from 'node:crypto';
-import { JobType } from '@prisma/client';
+import { AttemptStatus, JobType } from '@prisma/client';
+import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { requireTeacher } from '@/lib/auth';
 import { createAuditLog } from '@/lib/auditLogger';
@@ -10,6 +11,25 @@ import { enqueueResponseProcessing, runProcessingJob } from '@/lib/processingPip
 import { enqueueDurableResponseProcessing } from '@/lib/durableProcessingQueue';
 
 const isDbAvailable = () => !!process.env.DATABASE_URL;
+
+const reviewableAttemptStatuses: AttemptStatus[] = [
+  AttemptStatus.SUBMITTED,
+  AttemptStatus.PROCESSING,
+  AttemptStatus.OCR_PROCESSING,
+  AttemptStatus.TRANSCRIPTION_PROCESSING,
+  AttemptStatus.AI_ANALYZING,
+  AttemptStatus.NEEDS_TEACHER_REVIEW,
+  AttemptStatus.TEACHER_REVIEWED,
+  AttemptStatus.FEEDBACK_READY,
+  AttemptStatus.FAILED,
+];
+
+function revalidateReviewViews(examId: string) {
+  revalidatePath('/dashboard/exams');
+  revalidatePath(`/dashboard/exams/${examId}`);
+  revalidatePath(`/dashboard/exams/${examId}/review`);
+  revalidatePath(`/dashboard/exams/${examId}/analytics`);
+}
 
 export async function getExamReviewList(examId: string) {
   const teacher = await requireTeacher();
@@ -28,6 +48,7 @@ export async function getExamReviewList(examId: string) {
       where: {
         attempt: {
           examId,
+          status: { in: reviewableAttemptStatuses },
         },
       },
       include: {
@@ -106,7 +127,7 @@ export async function submitTeacherReview(payload: {
 
     const response = await prisma.studentResponse.findUnique({
       where: { id: payload.studentResponseId },
-      select: { attemptId: true },
+      select: { attemptId: true, attempt: { select: { examId: true } } },
     });
     if (response) {
       const responsesWithoutApproval = await prisma.studentResponse.count({
@@ -134,6 +155,8 @@ export async function submitTeacherReview(payload: {
       entityId: review.id,
       details: { approved: payload.approved },
     });
+
+    if (response) revalidateReviewViews(response.attempt.examId);
 
     return review;
   } else {
@@ -185,6 +208,8 @@ export async function reanalyzeStudentResponse(studentResponseId: string) {
       entityType: 'STUDENT_RESPONSE',
       entityId: studentResponseId,
     });
+
+    revalidateReviewViews(response.attempt.exam.id);
 
     return { success: true, jobId: job.id };
   } else {
