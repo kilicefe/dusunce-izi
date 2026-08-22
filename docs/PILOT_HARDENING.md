@@ -159,6 +159,8 @@ ORDER BY "status";
 - Aynı gün fiziksel production smoke testinde Google test kullanıcısı öğretmen paneline ulaştı; `T9003` sentetik öğrencisinin iki yanıtlı attempt'i `SUBMITTED`, token'ı yalnız 64 karakterlik hash, WebM sesi private `supabase://pilot-media/...` referansı ve iki idempotent processing işiyle doğrulandı. Geçersiz roster numarasının redakte React hatasına dönüşmesi tipli server-action hata sonucu ve iki regresyon testiyle giderildi.
 - Gerçek `MediaRecorder`, tarayıcı format seçimi ve mikrofon hata durumlarını içeren son production deployment `dpl_G1emvVJAAZxFEAENfc8rryPFmFTJ` olarak yayımlandı; canlı UI'da roster uyarısı, öğretmen oturumu, sınıf/sınav modülleri ve ses kayıt paneli konsol hatası olmadan açıldı.
 - Öğretmen gezinme ve veri görünürlüğü düzeltmeleri 22 Ağustos 2026'da `dpl_AnZU8uy8aHAs6atLmZ2wzdTADxVj` deployment'ı olarak production'a alındı. Fiziksel smoke testte dashboard → sınıflar → yeni sınıf → sınıf detayı → logo ile dashboard, sınav listesi ve inceleme kuyruğu akışları hatasız çalıştı; 2 sınıf / 1 öğrenci / 1 attempt sayaçları tutarlıydı, `IN_PROGRESS` yanıt inceleme kuyruğuna girmedi ve tarayıcı konsolunda hata oluşmadı. `/api/readiness` database, mediaStorage, processingWorker ve aiProvider kontrollerinin tamamı `true` olacak şekilde HTTP 200 döndürdü.
+- Aynı gün `UX Pilot Testi 7-B`, `UX9001 / Deneme Öğrenci` ve `UX Pilot Akış Testi` etiketli sentetik uçtan uca akış fiziksel production tarayıcısında tamamlandı. Sınav yayınlandı, öğrenci metin yanıtı kaydedilip teslim edildi, attempt `SUBMITTED` ve yalnız 64 karakterlik token hash'iyle doğrulandı; kalıcı iş `QUEUED -> RUNNING -> COMPLETED` ilerledi ve Gemini 3.6 Flash çıktısı öğretmen inceleme ekranında 4/4, %98 güven ile göründü. Analitik ekranı 1/1 tamamlanmayı gösterdi; öğretmen pedagojik onayı kullanıcı kararı olarak bırakıldı ve sınav `CLOSED` durumuna alındı.
+- Bu akışta yeni sınav kartının oluşturma cevabında sınıf ilişkisi/sayaçlar eksik olduğu için ilk çizimde `Sınıf Seçili (. Sınıf)` yazdığı görüldü. `createExam` artık `classroom` ve `_count` alanlarını döndürüyor; hedefli regresyon testi eklendi. Tam Vitest sonucu 86 başarılı / 1 koşullu atlanan test, TypeScript sonucu sıfır hatadır.
 
 ## Rollback sınırları
 
@@ -180,6 +182,7 @@ ORDER BY "status";
 - Readiness'in eksik/public Supabase medya kovasını reddetmesi.
 - Sınıf alt rotalarında öğretmen kabuğunun korunması, mobil menünün erişilebilir adları ve oturumsuz doğrudan rota yönlendirmesi için Playwright regresyonları.
 - Öğrenci sınava başladıktan sonra öğretmen rotalarının yenilenmesi ve `IN_PROGRESS` yanıtların inceleme kuyruğundan dışlanması için hedefli Vitest regresyonları.
+- Yeni oluşturulan sınavın kartta sınıf adı, soru sayısı ve attempt sayısını ilk çizimde göstermesi için create-action regresyon testi.
 
 ## Kalan riskler ve operasyonel gereksinimler
 

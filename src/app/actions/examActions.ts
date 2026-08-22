@@ -123,6 +123,13 @@ export async function createExam(formData: z.infer<typeof createExamSchema>) {
         },
       },
       include: {
+        classroom: true,
+        _count: {
+          select: {
+            questions: true,
+            attempts: true,
+          },
+        },
         questions: {
           include: {
             expectedConcepts: true,
