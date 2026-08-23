@@ -10,8 +10,13 @@ import {
   Upload,
   Square,
 } from 'lucide-react';
-import { saveStudentResponse, submitStudentExamAttempt } from '@/app/actions/studentExamActions';
-import { blobToDataUrl, selectAudioRecordingMimeType } from '@/lib/browserMediaRecorder';
+import {
+  createStudentMediaUploadTarget,
+  saveStudentResponse,
+  submitStudentExamAttempt,
+} from '@/app/actions/studentExamActions';
+import { selectAudioRecordingMimeType } from '@/lib/browserMediaRecorder';
+import { mediaUploadErrorMessage, uploadBlobToSignedUrl } from '@/lib/browserMediaUpload';
 
 export function StudentExamPortal({
   initialAttempt,
@@ -37,6 +42,8 @@ export function StudentExamPortal({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [audioError, setAudioError] = useState('');
+  const [mediaError, setMediaError] = useState('');
+  const [mediaUploadCount, setMediaUploadCount] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -83,8 +90,51 @@ export function StudentExamPortal({
     };
   }, []);
 
+  const uploadStudentBlob = async (input: {
+    blob: Blob;
+    fileName: string;
+    kind: 'image' | 'audio';
+    questionId: string;
+  }): Promise<MediaItem> => {
+    setMediaError('');
+    setMediaUploadCount((count) => count + 1);
+    try {
+      const result = await createStudentMediaUploadTarget({
+        attemptToken: token,
+        questionId: input.questionId,
+        kind: input.kind,
+        mimeType: input.blob.type,
+        fileSize: input.blob.size,
+      });
+      if (!result.ok) throw new Error(result.error);
+
+      await uploadBlobToSignedUrl({
+        target: result.target,
+        blob: input.blob,
+        fileName: input.fileName,
+      });
+      return {
+        storageValue: result.target.storageReference,
+        previewUrl: URL.createObjectURL(input.blob),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const publicMessage = message && !message.startsWith('MEDIA_')
+        ? message
+        : mediaUploadErrorMessage(error);
+      setMediaError(publicMessage);
+      throw error;
+    } finally {
+      setMediaUploadCount((count) => Math.max(0, count - 1));
+    }
+  };
+
   const handleSaveCurrentResponse = async () => {
     if (!currentQ) return;
+    if (mediaUploadCount > 0) {
+      setMediaError('Medya yüklemesi tamamlanmadan yanıt kaydedilemez.');
+      return;
+    }
     try {
       await saveStudentResponse({
         attemptToken: token,
@@ -100,20 +150,29 @@ export function StudentExamPortal({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!currentQ || !e.target.files) return;
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const currentImages = imageLists[currentQ.id] || [];
-        setImageLists({
-          ...imageLists,
-          [currentQ.id]: [...currentImages, { storageValue: result, previewUrl: result }],
-        });
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    if ((imageLists[currentQ.id] || []).length >= 5) {
+      setMediaError('Bir soru için en fazla 5 görsel yükleyebilirsiniz.');
+      return;
+    }
+
+    try {
+      const uploaded = await uploadStudentBlob({
+        blob: file,
+        fileName: file.name,
+        kind: 'image',
+        questionId: currentQ.id,
+      });
+      setImageLists((current) => ({
+        ...current,
+        [currentQ.id]: [...(current[currentQ.id] || []), uploaded],
+      }));
+    } catch {
+      // uploadStudentBlob exposes a safe, actionable message in the page.
     }
   };
 
@@ -174,18 +233,24 @@ export function StudentExamPortal({
         }
 
         try {
-          const dataUrl = await blobToDataUrl(blob);
           const recordedQuestionId = recordingQuestionIdRef.current || questionId;
+          const extension = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+          const uploaded = await uploadStudentBlob({
+            blob,
+            fileName: `ses-kaydi.${extension}`,
+            kind: 'audio',
+            questionId: recordedQuestionId,
+          });
           setAudioUrls((current) => ({
             ...current,
-            [recordedQuestionId]: { storageValue: dataUrl, previewUrl: dataUrl },
+            [recordedQuestionId]: uploaded,
           }));
           setAudioDurations((current) => ({
             ...current,
             [recordedQuestionId]: durationSeconds,
           }));
         } catch {
-          setAudioError('Ses kaydı okunamadı. Lütfen tekrar deneyiniz.');
+          setAudioError('Ses kaydı güvenli depolama alanına yüklenemedi. Lütfen tekrar deneyiniz.');
         }
       };
 
@@ -208,6 +273,10 @@ export function StudentExamPortal({
   };
 
   const handleSubmitAttempt = async () => {
+    if (mediaUploadCount > 0) {
+      setMediaError('Medya yüklemesi tamamlanmadan sınav gönderilemez.');
+      return;
+    }
     if (!confirm('Sınavı tamamlayıp göndermek istediğinize emin misiniz?')) return;
     setIsSubmitting(true);
     try {
@@ -265,8 +334,8 @@ export function StudentExamPortal({
 
         <button
           onClick={handleSubmitAttempt}
-          disabled={isSubmitting}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-sm shrink-0"
+          disabled={isSubmitting || mediaUploadCount > 0}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs transition shadow-sm shrink-0"
         >
           <Send className="w-4 h-4" />
           {isSubmitting ? 'Gönderiliyor...' : 'Sınavı Tamamla ve Gönder'}
@@ -341,6 +410,18 @@ export function StudentExamPortal({
               </button>
             </div>
 
+            {mediaUploadCount > 0 && (
+              <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-200 text-indigo-700 text-xs" role="status" aria-live="polite">
+                Medya güvenli depolama alanına yükleniyor…
+              </div>
+            )}
+
+            {mediaError && (
+              <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-red-700 text-xs" role="alert">
+                {mediaError}
+              </div>
+            )}
+
             {/* Input Panels */}
             {activeMode === 'text' && (
               <div>
@@ -365,6 +446,7 @@ export function StudentExamPortal({
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
                     onChange={handleFileUpload}
+                    disabled={mediaUploadCount > 0}
                     className="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                   />
                 </div>
@@ -388,8 +470,9 @@ export function StudentExamPortal({
                 <button
                   type="button"
                   onClick={handleAudioRecording}
+                  disabled={mediaUploadCount > 0}
                   className={`px-5 py-2.5 rounded-xl text-white font-bold transition inline-flex items-center gap-2 ${
-                    isRecording ? 'bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'
+                    isRecording ? 'bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed'
                   }`}
                 >
                   {isRecording ? (
@@ -428,9 +511,10 @@ export function StudentExamPortal({
               <button
                 type="button"
                 onClick={handleSaveCurrentResponse}
-                className="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs hover:bg-slate-800 transition"
+                disabled={mediaUploadCount > 0}
+                className="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
-                Bu Sorunun Yanıtını Kaydet
+                {mediaUploadCount > 0 ? 'Medya Yükleniyor…' : 'Bu Sorunun Yanıtını Kaydet'}
               </button>
             </div>
           </div>

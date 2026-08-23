@@ -9,10 +9,14 @@ type ParsedMedia = {
   extension: string;
 };
 
-type StoredMedia = {
+export type StoredMedia = {
   storageReference: string;
   mimeType: string;
   fileSize: number;
+};
+
+export type SignedStudentMediaUpload = StoredMedia & {
+  signedUrl: string;
 };
 
 const MIME_TYPES: Record<MediaKind, Record<string, string>> = {
@@ -35,10 +39,32 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function maximumBytes(kind: MediaKind): number {
+export function maximumMediaBytes(kind: MediaKind): number {
   return kind === 'image'
     ? positiveInteger(process.env.MEDIA_MAX_IMAGE_BYTES, 10 * 1024 * 1024)
     : positiveInteger(process.env.MEDIA_MAX_AUDIO_BYTES, 25 * 1024 * 1024);
+}
+
+export function normalizeMediaMimeType(mimeType: string): string {
+  return mimeType.split(';', 1)[0].trim().toLowerCase();
+}
+
+export function validateMediaDescriptor(
+  kind: MediaKind,
+  mimeTypeInput: string,
+  fileSize: number
+): { mimeType: string; extension: string; maximumBytes: number } {
+  const mimeType = normalizeMediaMimeType(mimeTypeInput);
+  const extension = MIME_TYPES[kind][mimeType];
+  if (!extension) throw new Error('UNSUPPORTED_MEDIA_TYPE');
+
+  const maximumBytes = maximumMediaBytes(kind);
+  if (!Number.isSafeInteger(fileSize) || fileSize <= 0) {
+    throw new Error('INVALID_MEDIA_SIZE');
+  }
+  if (fileSize > maximumBytes) throw new Error('MEDIA_TOO_LARGE');
+
+  return { mimeType, extension, maximumBytes };
 }
 
 function hasExpectedSignature(bytes: Buffer, mimeType: string): boolean {
@@ -69,12 +95,12 @@ export function parseMediaDataUrl(dataUrl: string, kind: MediaKind): ParsedMedia
   const match = /^data:([^;,]+);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(dataUrl);
   if (!match) throw new Error('INVALID_MEDIA_DATA_URL');
 
-  const mimeType = match[1].toLowerCase();
+  const mimeType = normalizeMediaMimeType(match[1]);
   const extension = MIME_TYPES[kind][mimeType];
   if (!extension) throw new Error('UNSUPPORTED_MEDIA_TYPE');
 
   const encoded = match[2].replace(/[\r\n]/g, '');
-  if (encoded.length > Math.ceil((maximumBytes(kind) * 4) / 3) + 4) {
+  if (encoded.length > Math.ceil((maximumMediaBytes(kind) * 4) / 3) + 4) {
     throw new Error('MEDIA_TOO_LARGE');
   }
   const bytes = Buffer.from(encoded, 'base64');
@@ -83,7 +109,7 @@ export function parseMediaDataUrl(dataUrl: string, kind: MediaKind): ParsedMedia
   if (!bytes.length || canonicalInput !== canonicalDecoded) {
     throw new Error('INVALID_MEDIA_ENCODING');
   }
-  if (bytes.length > maximumBytes(kind)) throw new Error('MEDIA_TOO_LARGE');
+  if (bytes.length > maximumMediaBytes(kind)) throw new Error('MEDIA_TOO_LARGE');
   if (!hasExpectedSignature(bytes, mimeType)) throw new Error('MEDIA_SIGNATURE_MISMATCH');
 
   return { bytes, mimeType, extension };
@@ -167,6 +193,115 @@ export function parseStorageReference(reference: string): { bucket: string; obje
   return { bucket, objectPath };
 }
 
+function studentMediaObjectPrefix(attemptId: string, studentResponseId: string): string {
+  return [
+    'attempts',
+    encodeURIComponent(attemptId),
+    'responses',
+    encodeURIComponent(studentResponseId),
+  ].join('/');
+}
+
+export function buildStudentMediaObjectPath(input: {
+  attemptId: string;
+  studentResponseId: string;
+  extension: string;
+  objectId?: string;
+}): string {
+  if (!/^[a-z0-9]+$/i.test(input.extension)) throw new Error('INVALID_MEDIA_EXTENSION');
+  const objectId = input.objectId || randomUUID();
+  if (!/^[a-z0-9-]+$/i.test(objectId)) throw new Error('INVALID_MEDIA_OBJECT_ID');
+  return `${studentMediaObjectPrefix(input.attemptId, input.studentResponseId)}/${objectId}.${input.extension}`;
+}
+
+export function validateStudentMediaReferenceScope(input: {
+  storageReference: string;
+  expectedBucket: string;
+  attemptId: string;
+  studentResponseId: string;
+}): { bucket: string; objectPath: string } {
+  const parsed = parseStorageReference(input.storageReference);
+  const expectedPrefix = `${studentMediaObjectPrefix(input.attemptId, input.studentResponseId)}/`;
+  if (parsed.bucket !== input.expectedBucket || !parsed.objectPath.startsWith(expectedPrefix)) {
+    throw new Error('INVALID_MEDIA_REFERENCE_SCOPE');
+  }
+  return parsed;
+}
+
+export async function createSignedStudentMediaUpload(input: {
+  attemptId: string;
+  studentResponseId: string;
+  kind: MediaKind;
+  mimeType: string;
+  fileSize: number;
+}): Promise<SignedStudentMediaUpload> {
+  const descriptor = validateMediaDescriptor(input.kind, input.mimeType, input.fileSize);
+  const { bucket } = getStorageConfig();
+  const objectPath = buildStudentMediaObjectPath({
+    attemptId: input.attemptId,
+    studentResponseId: input.studentResponseId,
+    extension: descriptor.extension,
+  });
+  const { data, error } = await storageClient()
+    .storage.from(bucket)
+    .createSignedUploadUrl(objectPath, { upsert: false });
+  if (error || !data?.signedUrl) {
+    throw new Error(`MEDIA_SIGNED_UPLOAD_FAILED: ${error?.message || 'signed URL missing'}`);
+  }
+
+  return {
+    signedUrl: data.signedUrl,
+    storageReference: buildStorageReference(bucket, objectPath),
+    mimeType: descriptor.mimeType,
+    fileSize: input.fileSize,
+  };
+}
+
+export async function validateStoredStudentMedia(input: {
+  storageReference: string;
+  attemptId: string;
+  studentResponseId: string;
+  kind: MediaKind;
+}): Promise<StoredMedia> {
+  const { bucket } = getStorageConfig();
+  const { objectPath } = validateStudentMediaReferenceScope({
+    storageReference: input.storageReference,
+    expectedBucket: bucket,
+    attemptId: input.attemptId,
+    studentResponseId: input.studentResponseId,
+  });
+  const client = storageClient().storage.from(bucket);
+  const { data: info, error: infoError } = await client.info(objectPath);
+  if (infoError || !info) {
+    throw new Error(`MEDIA_UPLOAD_NOT_FOUND: ${infoError?.message || 'metadata missing'}`);
+  }
+
+  const infoRecord = info as typeof info & {
+    contentType?: string;
+    size?: number;
+    metadata?: { mimetype?: string; size?: number };
+  };
+  const mimeType = normalizeMediaMimeType(
+    infoRecord.contentType || infoRecord.metadata?.mimetype || ''
+  );
+  const fileSize = infoRecord.size ?? infoRecord.metadata?.size ?? 0;
+  const descriptor = validateMediaDescriptor(input.kind, mimeType, fileSize);
+  if (!objectPath.endsWith(`.${descriptor.extension}`)) {
+    throw new Error('MEDIA_EXTENSION_MISMATCH');
+  }
+
+  const { data: storedBlob, error: downloadError } = await client.download(objectPath);
+  if (downloadError || !storedBlob) {
+    throw new Error(`MEDIA_DOWNLOAD_FAILED: ${downloadError?.message || 'empty body'}`);
+  }
+  const bytes = Buffer.from(await storedBlob.arrayBuffer());
+  if (bytes.length !== fileSize || !hasExpectedSignature(bytes, mimeType)) {
+    throw new Error('MEDIA_SIGNATURE_MISMATCH');
+  }
+
+  return { storageReference: input.storageReference, mimeType, fileSize };
+}
+
 export async function uploadStudentMedia(input: {
   attemptId: string;
   studentResponseId: string;
@@ -175,13 +310,11 @@ export async function uploadStudentMedia(input: {
 }): Promise<StoredMedia> {
   const media = parseMediaDataUrl(input.dataUrl, input.kind);
   const { bucket } = getStorageConfig();
-  const objectPath = [
-    'attempts',
-    encodeURIComponent(input.attemptId),
-    'responses',
-    encodeURIComponent(input.studentResponseId),
-    `${randomUUID()}.${media.extension}`,
-  ].join('/');
+  const objectPath = buildStudentMediaObjectPath({
+    attemptId: input.attemptId,
+    studentResponseId: input.studentResponseId,
+    extension: media.extension,
+  });
 
   const { error } = await storageClient()
     .storage.from(bucket)

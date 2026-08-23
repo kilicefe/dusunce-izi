@@ -16,11 +16,12 @@ Bu dal, gerçek pilot öncesi kimlik doğrulama, PostgreSQL doğrulaması, öğr
 
 ### Özel medya depolama
 
-- Görsel ve ses data URL'leri veritabanına yazılmadan önce sunucu tarafında allow-list MIME ve boyut kontrollerinden geçer.
-- Medya, private Supabase Storage kovasına service-role istemcisiyle yazılır. Service-role anahtarı hiçbir `NEXT_PUBLIC_` değişkeninde veya istemci paketinde kullanılmaz.
+- Legacy görsel ve ses data URL'leri veritabanına yazılmadan önce sunucu tarafında allow-list MIME ve boyut kontrollerinden geçer.
+- Yeni öğrenci medyası, server action gövdesine Base64 olarak alınmaz. Sunucu attempt/response kapsamına bağlı kısa ömürlü bir signed-upload token üretir; tarayıcı dosyayı doğrudan private Supabase Storage kovasına gönderir. Böylece Next.js Server Action'ın varsayılan 1 MiB gövde sınırı aşılmaz.
+- Service-role/secret anahtarı yalnız sunucuda signed-upload token üretmek, yüklenen nesneyi doğrulamak ve yaşam döngüsünü yönetmek için kullanılır. Anahtar hiçbir `NEXT_PUBLIC_` değişkeninde veya istemci paketinde bulunmaz.
 - Veritabanı sadece `supabase://bucket/object-path` biçiminde opak referans tutar.
 - Tarayıcıya en fazla 10 dakika, varsayılan 5 dakika geçerli imzalı URL verilir. Public bucket URL'si kullanılmaz.
-- Öğrenci yalnızca mevcut yanıtına ait depolama referanslarını yeniden kullanabilir; başka bir yanıttan nesne referansı enjekte edemez.
+- Öğrenci yalnızca `IN_PROGRESS` attempt'inde, o sınava ait soru için ve mevcut yanıtına bağlı object path alabilir. Kaydetme sırasında bucket/path kapsamı, Storage metadata boyutu/MIME türü ve indirilen dosyanın magic signature'ı yeniden doğrulanır; başka attempt/yanıttan nesne referansı enjekte edilemez.
 - Yanıt medyası değiştirildiğinde kaldırılan private nesneler için silme işlemi yapılır.
 - Legacy Base64 kayıtlarını private kovaya taşıyan `npm run migrate:legacy-media` backfill komutu eklendi.
 - Readiness yalnız environment değişkenlerine bakmaz; yapılandırılan kovanın Supabase'de gerçekten var ve private olduğunu da doğrular. Yanlış kova adı veya public kova 503 üretir.
@@ -76,7 +77,7 @@ Queue locking ve transaction yaklaşımı için: [PostgreSQL 16 SELECT / SKIP LO
    - Supabase Dashboard'da `pilot-media` (veya `SUPABASE_MEDIA_BUCKET`) adlı **private** bucket oluşturun.
    - Görsel MIME allow-list: `image/jpeg`, `image/png`, `image/webp`; üst sınır 10 MiB.
    - Ses MIME allow-list: `audio/webm`, `audio/mpeg`, `audio/mp4`, `audio/ogg`, `audio/wav`; üst sınır 25 MiB.
-   - Tarayıcı için `anon`/`authenticated` upload veya select policy eklemeyin. Bu uygulama bütün depolama erişimini yetkilendirilmiş sunucu kodundan yapar.
+   - Tarayıcı için `anon`/`authenticated` upload veya select policy eklemeyin. Tarayıcı upload'ı yalnız sunucunun mevcut attempt/response için ürettiği signed token ile doğrudan Storage'a gider; okuma, doğrulama ve silme işlemleri yalnız yetkili sunucu kodundan yapılır.
 
 3. **Secret ve environment değişkenleri**
    - Mevcut auth/DB değişkenlerine ek olarak aşağıdakileri deployment secret store'a yazın:
@@ -120,7 +121,7 @@ Queue locking ve transaction yaklaşımı için: [PostgreSQL 16 SELECT / SKIP LO
    - `/api/readiness` için 200 bekleyin.
    - Readiness yanıtından önce `SUPABASE_MEDIA_BUCKET` değerinin Dashboard'daki private kova adıyla birebir eşleştiğini doğrulayın; yalnız anahtarların tanımlı olması yeterli değildir.
    - Yeni bir öğrenci girişinden sonra DB'de yalnızca 64 karakterlik `attemptTokenHash` bulunduğunu doğrulayın.
-   - Görsel ve ses yanıtı yükleyip DB'de `supabase://` referansı, tarayıcıda süreli signed URL oluştuğunu doğrulayın.
+   - 1 MiB'tan büyük geçerli bir görsel ve ses yanıtı yükleyin. Dosyanın Server Action gövdesinden geçmeden Storage'a PUT edildiğini, kaydetme POST isteğinin 413/500 vermediğini, DB'de `supabase://` referansı ve okumada süreli signed URL oluştuğunu doğrulayın.
    - Bir attempt submit edin; işin `QUEUED -> RUNNING -> COMPLETED` ilerlediğini ve teacher review kaydı oluştuğunu doğrulayın.
    - Öğretmen hesabıyla `/dashboard -> /classrooms -> /classrooms/new -> /classrooms/{id}` akışını izleyin; her adımda logo ve ana menünün görünür, aktif menü işaretinin doğru olduğunu doğrulayın.
    - 390×844 mobil görünümde menünün tek satırda kaldığını, form alanlarının taşmadığını ve logo ile dashboard'a dönülebildiğini doğrulayın.
@@ -161,6 +162,7 @@ ORDER BY "status";
 - Öğretmen gezinme ve veri görünürlüğü düzeltmeleri 22 Ağustos 2026'da `dpl_AnZU8uy8aHAs6atLmZ2wzdTADxVj` deployment'ı olarak production'a alındı. Fiziksel smoke testte dashboard → sınıflar → yeni sınıf → sınıf detayı → logo ile dashboard, sınav listesi ve inceleme kuyruğu akışları hatasız çalıştı; 2 sınıf / 1 öğrenci / 1 attempt sayaçları tutarlıydı, `IN_PROGRESS` yanıt inceleme kuyruğuna girmedi ve tarayıcı konsolunda hata oluşmadı. `/api/readiness` database, mediaStorage, processingWorker ve aiProvider kontrollerinin tamamı `true` olacak şekilde HTTP 200 döndürdü.
 - Aynı gün `UX Pilot Testi 7-B`, `UX9001 / Deneme Öğrenci` ve `UX Pilot Akış Testi` etiketli sentetik uçtan uca akış fiziksel production tarayıcısında tamamlandı. Sınav yayınlandı, öğrenci metin yanıtı kaydedilip teslim edildi, attempt `SUBMITTED` ve yalnız 64 karakterlik token hash'iyle doğrulandı; kalıcı iş `QUEUED -> RUNNING -> COMPLETED` ilerledi ve Gemini 3.6 Flash çıktısı öğretmen inceleme ekranında 4/4, %98 güven ile göründü. Analitik ekranı 1/1 tamamlanmayı gösterdi; öğretmen pedagojik onayı kullanıcı kararı olarak bırakıldı ve sınav `CLOSED` durumuna alındı.
 - Bu akışta yeni sınav kartının oluşturma cevabında sınıf ilişkisi/sayaçlar eksik olduğu için ilk çizimde `Sınıf Seçili (. Sınıf)` yazdığı görüldü. `createExam` artık `classroom` ve `_count` alanlarını döndürüyor; hedefli regresyon testi eklendi. Tam Vitest sonucu 86 başarılı / 1 koşullu atlanan test, TypeScript sonucu sıfır hatadır.
+- 23 Ağustos 2026'da production loglarında görsel/ses kaydetme POST'larının `Body exceeded 1 MB limit` nedeniyle içte 413, kullanıcıya 500/React #441 olarak döndüğü doğrulandı. Düzeltme yeni medyayı attempt/response kapsamlı signed-upload ile doğrudan private Storage'a gönderiyor; 1.200.000 baytlık sentetik PNG ve WebM gerçek Supabase entegrasyonunda yüklenip metadata, imza ve private referans doğrulamasından geçti ve test nesneleri hemen temizlendi. Bu kayıt production deployment doğrulaması tamamlanana kadar uygulama seviyesi kabul sonucu olarak değerlendirilmelidir.
 
 ## Rollback sınırları
 
@@ -171,7 +173,8 @@ ORDER BY "status";
 ## Hedefli test kapsamı
 
 - Attempt token entropy, deterministik hash ve ham token'ın persistence nesnesinde bulunmaması.
-- MIME allow-list, Base64 doğrulaması ve storage path traversal reddi.
+- MIME allow-list, codec parametresi normalizasyonu, Base64 doğrulaması, signed-upload boyut değişikliği ve storage path/attempt kapsamı reddi.
+- 1 MiB'tan büyük Blob'un Server Action'a eklenmeden doğrudan signed Storage URL'sine PUT edilmesi ve Storage hatasının kapalı biçimde kullanıcıya dönmesi.
 - Worker bearer secret doğrulaması ve retry backoff sınırı.
 - Ardışık migration dosyalarında aynı PostgreSQL enum'unun yeniden oluşturulmaması.
 - RLS migration'ında 50 tablonun tamamının korunması, browser rollerinin grant'lerinin kaldırılması ve istemci policy'si oluşturulmaması.
@@ -190,6 +193,8 @@ ORDER BY "status";
 - Supabase secret/service-role anahtarı Storage genelinde yüksek yetkilidir. Secret yalnız sunucuda tutulmalı, erişimi deployment rolleriyle sınırlandırılmalı ve düzenli döndürülmelidir. Bu yetkiyle oluşturulan nesnelerde `owner_id` beklenmez; nesne yetkilendirmesi uygulamanın server-side attempt/teacher kontrollerine dayanır.
 - EduAnalytics ortamında `dusunce_izi_backend` adlı modern secret key oluşturuldu; Dashboard reveal servisi hata verdiği için mevcut local süreç geçici olarak legacy `service_role` fallback'ini kullanıyor. Modern anahtar okunup secret store'a taşındıktan sonra legacy anahtar devreden çıkarılmalı; kullanılmayacaksa yeni anahtar silinmelidir.
 - Signed URL süre dolana kadar kullanılabilir; acil erişim kesme gerektiğinde nesne silinmelidir. CDN invalidation anlık olmayabilir.
+- Signed-upload token'ı Supabase tarafından yaklaşık iki saat geçerli tutulur. Yol attempt/response'a bağlı ve kaydetme öncesi sunucuda yeniden doğrulansa da, upload tamamlandıktan sonra sekme kapanırsa DB'ye bağlanmamış yetim nesne kalabilir; yaşı geçmiş `attempts/` nesneleri için periyodik orphan taraması ve alarm kurulmalıdır.
+- Doğrudan upload tarayıcı ile Storage arasındaki CORS/ağ yoluna bağlıdır ve hata halinde yeniden deneme mesajı verir; kesintili bağlantılarda resumable upload henüz yoktur. Özellikle 6 MiB üzeri veya uzun ses kayıtları için Supabase TUS/resumable upload pilot sonrası değerlendirilmelidir.
 - Queue DB çıktıları idempotenttir ancak at-least-once teslimatta worker lease kaybettikten sonra dış AI çağrısı tekrarlanabilir ve ek maliyet doğurabilir. Queue backlog, yaşlı `RUNNING` işler, retry oranı ve AI maliyeti için alarm kurulmalıdır.
 - Scheduler/worker kesintisi kullanıcı submit'ini kaybetmez fakat analiz gecikir. Vercel Hobby Cron yalnız günlük emniyet çağrısıdır; dakikalık Supabase Cron ve `net._http_response` sonuçları izlenmelidir. `FAILED` işler için operasyonel dead-letter inceleme ve manuel requeue prosedürü gerekir.
 - Canlı sentetik ses fixture işinde Gemini üç kez `500 INTERNAL` döndürdü; durable queue 30/60 saniyelik retry/backoff'u uygulayıp işi `FAILED` yaptı, eşzamanlı metin işi `COMPLETED` kaldı. Bu sonuç sağlayıcı hata oranı, retry tüketimi, son `FAILED` durumları ve manuel requeue için alarm/prosedür gereksinimini somutlaştırır.

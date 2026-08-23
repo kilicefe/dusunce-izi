@@ -15,9 +15,11 @@ import {
 import { processAttemptResponses } from '@/lib/processingPipeline';
 import { generateAttemptToken, hashAttemptToken } from '@/lib/attemptTokens';
 import {
+  createSignedStudentMediaUpload,
   createSignedMediaUrl,
   deleteStoredMedia,
   uploadStudentMedia,
+  validateStoredStudentMedia,
 } from '@/lib/mediaStorage';
 import { ExamAttempt, AttemptStatus } from '@/types/database';
 import { revalidatePath } from 'next/cache';
@@ -35,6 +37,80 @@ const studentLoginSchema = z.object({
   shortCode: z.string().min(1, 'Sınav kodu girilmelidir'),
   schoolNumber: z.string().min(1, 'Okul numarası girilmelidir'),
 });
+
+const studentMediaUploadSchema = z.object({
+  attemptToken: z.string().min(1),
+  questionId: z.string().uuid(),
+  kind: z.enum(['image', 'audio']),
+  mimeType: z.string().min(1).max(128),
+  fileSize: z.number().int().positive(),
+});
+
+async function getWritableStudentResponse(attemptToken: string, questionId: string) {
+  const attempt = await prisma.examAttempt.findUnique({
+    where: { attemptTokenHash: hashAttemptToken(attemptToken) },
+  });
+  if (!attempt) throw new Error('NOT_FOUND: Oturum bulunamadı');
+  if (attempt.status !== 'IN_PROGRESS') throw new Error('ATTEMPT_NOT_WRITABLE');
+
+  const question = await prisma.question.findFirst({
+    where: { id: questionId, examId: attempt.examId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!question) throw new Error('QUESTION_NOT_IN_ATTEMPT');
+
+  const response = await prisma.studentResponse.upsert({
+    where: {
+      attemptId_questionId: {
+        attemptId: attempt.id,
+        questionId,
+      },
+    },
+    create: { attemptId: attempt.id, questionId },
+    update: {},
+  });
+  return { attempt, response };
+}
+
+export async function createStudentMediaUploadTarget(
+  payload: z.infer<typeof studentMediaUploadSchema>
+) {
+  const validation = studentMediaUploadSchema.safeParse(payload);
+  if (!validation.success) {
+    return { ok: false as const, error: 'Medya yükleme bilgileri geçersiz.' };
+  }
+  if (!isDbAvailable()) {
+    return { ok: false as const, error: 'Güvenli medya depolaması kullanılamıyor.' };
+  }
+
+  try {
+    const { attempt, response } = await getWritableStudentResponse(
+      validation.data.attemptToken,
+      validation.data.questionId
+    );
+    const target = await createSignedStudentMediaUpload({
+      attemptId: attempt.id,
+      studentResponseId: response.id,
+      kind: validation.data.kind,
+      mimeType: validation.data.mimeType,
+      fileSize: validation.data.fileSize,
+    });
+    return { ok: true as const, target };
+  } catch (error) {
+    const code = error instanceof Error ? error.message : '';
+    if (code.includes('MEDIA_TOO_LARGE')) {
+      return { ok: false as const, error: 'Dosya izin verilen boyut sınırını aşıyor.' };
+    }
+    if (code.includes('UNSUPPORTED_MEDIA_TYPE')) {
+      return { ok: false as const, error: 'Bu dosya biçimi desteklenmiyor.' };
+    }
+    if (code.includes('ATTEMPT_NOT_WRITABLE')) {
+      return { ok: false as const, error: 'Tamamlanmış bir sınavın yanıtları değiştirilemez.' };
+    }
+    console.error('Student media upload target creation failed', error);
+    return { ok: false as const, error: 'Güvenli medya yüklemesi başlatılamadı.' };
+  }
+}
 
 export async function loginStudentForExam(shortCode: string, schoolNumber: string) {
   const validation = studentLoginSchema.safeParse({ shortCode, schoolNumber });
@@ -250,29 +326,10 @@ export async function saveStudentResponse(payload: {
   audioDuration?: number;
 }) {
   if (isDbAvailable()) {
-    const attempt = await prisma.examAttempt.findUnique({
-      where: { attemptTokenHash: hashAttemptToken(payload.attemptToken) },
-    });
-
-    if (!attempt) throw new Error('NOT_FOUND: Oturum bulunamadı');
-
-    let response = await prisma.studentResponse.findUnique({
-      where: {
-        attemptId_questionId: {
-          attemptId: attempt.id,
-          questionId: payload.questionId,
-        },
-      },
-    });
-
-    if (!response) {
-      response = await prisma.studentResponse.create({
-        data: {
-          attemptId: attempt.id,
-          questionId: payload.questionId,
-        },
-      });
-    }
+    const { attempt, response } = await getWritableStudentResponse(
+      payload.attemptToken,
+      payload.questionId
+    );
 
     if (payload.typedText !== undefined) {
       await prisma.textResponse.upsert({
@@ -297,7 +354,7 @@ export async function saveStudentResponse(payload: {
       const currentByReference = new Map(
         currentImages.map((image) => [image.storageUrl, image])
       );
-      const uploadedImages: Array<{
+      const newImages: Array<{
         storageReference: string;
         mimeType: string;
         fileSize: number;
@@ -306,7 +363,7 @@ export async function saveStudentResponse(payload: {
       try {
         for (const value of payload.imageUrls) {
           if (value.startsWith('data:')) {
-            uploadedImages.push(
+            newImages.push(
               await uploadStudentMedia({
                 attemptId: attempt.id,
                 studentResponseId: response.id,
@@ -315,14 +372,21 @@ export async function saveStudentResponse(payload: {
               })
             );
           } else if (!currentByReference.has(value)) {
-            throw new Error('INVALID_MEDIA_REFERENCE');
+            newImages.push(
+              await validateStoredStudentMedia({
+                storageReference: value,
+                attemptId: attempt.id,
+                studentResponseId: response.id,
+                kind: 'image',
+              })
+            );
           }
         }
 
         const retainedReferences = new Set(
           payload.imageUrls.filter((value) => currentByReference.has(value))
         );
-        const uploadedForCreate = [...uploadedImages];
+        const uploadedForCreate = [...newImages];
         await prisma.$transaction([
           prisma.imageResponse.deleteMany({
             where: {
@@ -361,7 +425,7 @@ export async function saveStudentResponse(payload: {
         );
       } catch (error) {
         await Promise.allSettled(
-          uploadedImages.map((image) => deleteStoredMedia(image.storageReference))
+          newImages.map((image) => deleteStoredMedia(image.storageReference))
         );
         throw error;
       }
@@ -383,13 +447,19 @@ export async function saveStudentResponse(payload: {
           data: { durationSeconds: payload.audioDuration || currentAudio.durationSeconds },
         });
       } else {
-        if (!payload.audioUrl.startsWith('data:')) throw new Error('INVALID_MEDIA_REFERENCE');
-        const uploadedAudio = await uploadStudentMedia({
-          attemptId: attempt.id,
-          studentResponseId: response.id,
-          kind: 'audio',
-          dataUrl: payload.audioUrl,
-        });
+        const uploadedAudio = payload.audioUrl.startsWith('data:')
+          ? await uploadStudentMedia({
+              attemptId: attempt.id,
+              studentResponseId: response.id,
+              kind: 'audio',
+              dataUrl: payload.audioUrl,
+            })
+          : await validateStoredStudentMedia({
+              storageReference: payload.audioUrl,
+              attemptId: attempt.id,
+              studentResponseId: response.id,
+              kind: 'audio',
+            });
         try {
           await prisma.audioResponse.upsert({
             where: { studentResponseId: response.id },

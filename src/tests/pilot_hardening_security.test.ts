@@ -3,11 +3,15 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { generateAttemptToken, hashAttemptToken } from '../lib/attemptTokens';
 import {
+  buildStudentMediaObjectPath,
   buildStorageReference,
   hasMediaStorageConfig,
+  normalizeMediaMimeType,
   parseMediaDataUrl,
   parseStorageReference,
+  validateMediaDescriptor,
   validatePrivateMediaBucket,
+  validateStudentMediaReferenceScope,
 } from '../lib/mediaStorage';
 import {
   computeRetryDelayMs,
@@ -150,6 +154,46 @@ describe('pilot hardening security primitives', () => {
         'image'
       )
     ).toThrow('MEDIA_SIGNATURE_MISMATCH');
+  });
+
+  it('normalizes recorder codec parameters and enforces direct-upload descriptors', () => {
+    expect(normalizeMediaMimeType('audio/webm;codecs=opus')).toBe('audio/webm');
+    expect(validateMediaDescriptor('audio', 'audio/webm;codecs=opus', 1_200_000)).toMatchObject({
+      mimeType: 'audio/webm',
+      extension: 'webm',
+    });
+    expect(() => validateMediaDescriptor('image', 'image/svg+xml', 100)).toThrow(
+      'UNSUPPORTED_MEDIA_TYPE'
+    );
+    expect(() => validateMediaDescriptor('image', 'image/png', 0)).toThrow(
+      'INVALID_MEDIA_SIZE'
+    );
+  });
+
+  it('scopes signed uploads to the current attempt and response', () => {
+    const objectPath = buildStudentMediaObjectPath({
+      attemptId: 'attempt-a',
+      studentResponseId: 'response-a',
+      extension: 'png',
+      objectId: '123e4567-e89b-12d3-a456-426614174000',
+    });
+    const reference = buildStorageReference('pilot-media', objectPath);
+    expect(
+      validateStudentMediaReferenceScope({
+        storageReference: reference,
+        expectedBucket: 'pilot-media',
+        attemptId: 'attempt-a',
+        studentResponseId: 'response-a',
+      })
+    ).toEqual({ bucket: 'pilot-media', objectPath });
+    expect(() =>
+      validateStudentMediaReferenceScope({
+        storageReference: reference,
+        expectedBucket: 'pilot-media',
+        attemptId: 'attempt-b',
+        studentResponseId: 'response-a',
+      })
+    ).toThrow('INVALID_MEDIA_REFERENCE_SCOPE');
   });
 
   it('round-trips opaque private storage references and rejects traversal', () => {

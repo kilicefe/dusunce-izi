@@ -23,7 +23,7 @@ Vercel Hobby planı dakikalık Cron kabul etmez. Bu nedenle `vercel.json` yalnı
    - `20260814000000_pilot_media_tokens_queue`
    - `20260814170000_secure_public_schema_rls`
    - Son migration Supabase'in `anon` ve `authenticated` rollerini yalnız mevcutlarsa hedefler. Böylece aynı migration standart PostgreSQL doğrulama ortamında rol oluşturma yan etkisi olmadan çalışır; Supabase'te browser-role grant'leri kaldırılmaya devam eder.
-3. `pilot-media` kovasını private oluşturun. `anon` veya `authenticated` için upload/read policy eklemeyin.
+3. `pilot-media` kovasını private oluşturun. `anon` veya `authenticated` için upload/read policy eklemeyin. Öğrenci tarayıcısı yalnız sunucunun attempt/response kapsamıyla ürettiği signed-upload token üzerinden doğrudan Storage'a yazar; service-role/secret anahtarı istemciye verilmez.
 4. Scheduler için `pg_net` ve `pg_cron` uzantılarını etkinleştirin. Canlı ortamda bu adım Supabase migration geçmişine `enable_processing_scheduler_extensions` olarak yazılmıştır.
 5. Security Advisor'ı çalıştırın. Sunucuya özel 50 tabloda `rls_enabled_no_policy` bilgi kaydı beklenir; kritik/yüksek uyarı kabul edilmez.
 
@@ -123,17 +123,21 @@ Dağıtımdan sonra:
 3. Google giriş callback'i production alan adına dönmelidir.
 4. Supabase `cron.job_run_details` son çalışmayı `succeeded`, `net._http_response` son çağrıyı HTTP 200 göstermelidir.
 5. Yeni öğrenci attempt'inde yalnız 64 karakterlik `attemptTokenHash` saklanmalıdır.
-6. Medya kayıtları `supabase://pilot-media/...` biçiminde olmalı, kova public olmamalıdır.
+6. 1 MiB'tan büyük geçerli bir görsel ve ses fixture'ı yükleyin. Upload doğrudan signed Storage URL'sine gitmeli; kaydetme isteği 413/500 vermemeli, medya kayıtları `supabase://pilot-media/attempts/{attemptId}/responses/{responseId}/...` biçiminde olmalı ve kova public olmamalıdır.
 7. Submit edilen kuyruk işi `QUEUED -> RUNNING -> COMPLETED` ilerlemelidir.
 
 16 Ağustos 2026 veri/queue doğrulamasında readiness HTTP 200 döndü; iki attempt hash'i geçerliydi, iki medya kaydı güvenliydi, altı kuyruk işi tamamlanmıştı ve dakikalık scheduler anahtar rotasyonundan sonraki çağrılarda HTTP 200 aldı. 22 Ağustos 2026'da gerçek Google OAuth anahtarları Vercel'e taşındı ve deployment `dpl_3FcWj1YzQF6RzcrdQ4NgUsUW57EM` production alan adına başarıyla alias edildi.
 
 22 Ağustos 2026 uçtan uca canlı smoke testinde test kullanıcısı Google OAuth ile `/dashboard` sayfasına ulaştı. `RYB5N9` sınavında `T9003` sentetik öğrencisi iki metin ve bir sentetik WebM ses yanıtı gönderdi; attempt `SUBMITTED`, token hash uzunluğu 64, ses referansı `supabase://pilot-media/...` ve iki processing işi kalıcı kuyrukta doğrulandı. Geçersiz öğrenci numarasının production'da redakte React hatası göstermemesi için beklenen giriş hataları tipli server-action sonucu yapıldı ve iki regresyon testi eklendi. Gerçek `MediaRecorder` düzeltmesini içeren son deployment `dpl_G1emvVJAAZxFEAENfc8rryPFmFTJ` production alan adına alias edildi.
 
+23 Ağustos 2026'da production Vercel logları görsel/ses kaydetme isteklerinin Server Action `Body exceeded 1 MB limit` hatasıyla içte 413, dışta 500 döndüğünü gösterdi. Attempt/response kapsamlı signed direct-upload düzeltmesi gerçek private Supabase kovasında 1.200.000 baytlık sentetik PNG ve WebM ile doğrulandı; nesneler doğrulama sonrasında temizlendi. Production'a yeni sürüm alındıktan sonra bu bölümdeki 1 MiB üstü fiziksel tarayıcı kontrolü ve runtime log kontrolü release gate olarak tekrarlanmalıdır.
+
 ## Kalan operasyonel riskler
 
 - Vercel Hobby Cron yalnız günlük çalışır; dakikalık Supabase Cron kapatılırsa işleme ertesi emniyet çağrısına kadar gecikir. Cron ve HTTP yanıtları için alarm kurulmalıdır.
 - Supabase service-role anahtarı Storage genelinde yüksek yetkilidir; modern `sb_secret_...` anahtarına kontrollü geçiş ve rotasyon planlanmalıdır.
+- Signed-upload token'ları yaklaşık iki saat geçerli olabilir. Sekmenin upload sonrasında fakat DB kaydından önce kapanması yetim private nesne bırakabilir; zamanlanmış orphan temizliği ve nesne yaşı alarmı kurulmalıdır.
+- Doğrudan browser upload ağ/CORS yoluna bağlıdır; tekrar deneme mesajı vardır fakat resumable upload yoktur. Kesintili ağ ve büyük sesler için TUS/resumable upload ayrıca değerlendirilmelidir.
 - Eski prototip tablolarında performans danışmanı uyarıları vardır. Bunlar Prisma pilot tablolarından ayrıdır fakat veri API yüzeyi ve RLS politikaları ayrı bir bakım turunda sadeleştirilmelidir.
 - Ses düğmesi gerçek tarayıcı `MediaRecorder` akışını, desteklenen MIME seçimini, kayıt süresini ve stream temizliğini kullanır. Pilot cihaz/tarayıcı matrisinde mikrofon izni, gerçek kayıt ve sağlayıcı transkripsiyonu ayrıca kabul testinden geçirilmelidir.
 - Malware taraması, içerik moderasyonu ve EXIF temizleme henüz yoktur.
