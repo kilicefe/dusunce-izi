@@ -1,1 +1,4 @@
 @import "tailwindcss";
+@source "./**/*.{ts,tsx}";
+
+/* Utilities are compiled for Next.js by @tailwindcss/postcss. */

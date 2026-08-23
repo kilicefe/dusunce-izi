@@ -21,20 +21,20 @@ export default async function DashboardPage() {
             Hoş Geldiniz, {teacher.name || teacher.email}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Düşünce İzi Sistem Modülleri (Sprint 6.1 & 6.2) — Sınıf Yönetimi, Sınav Portalı, Multimodal AI Analiz ve Pedagojik İnceleme Arayüzü Etkin.
+            Sınıflarınızı yönetin, açık uçlu sınavlar hazırlayın ve öğrenci yanıtlarını pedagojik açıdan inceleyin.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
           <Link
             href="/dashboard/exams"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm shadow-sm transition"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm shadow-sm transition"
           >
             <BookOpen className="w-4 h-4" />
             Sınav Yönetimi
           </Link>
           <Link
             href="/classrooms/new"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition"
           >
             <Plus className="w-4 h-4" />
             Yeni Sınıf Ekle

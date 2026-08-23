@@ -12,8 +12,18 @@ import {
   setItem,
   STORAGE_KEYS,
 } from '@/lib/db';
+import { revalidatePath } from 'next/cache';
 
 const isDbAvailable = () => !!process.env.DATABASE_URL;
+
+function revalidateExamViews(examId?: string) {
+  revalidatePath('/dashboard/exams');
+  if (examId) {
+    revalidatePath(`/dashboard/exams/${examId}`);
+    revalidatePath(`/dashboard/exams/${examId}/review`);
+    revalidatePath(`/dashboard/exams/${examId}/analytics`);
+  }
+}
 
 const questionSchema = z.object({
   title: z.string().min(1, 'Soru başlığı zorunludur'),
@@ -113,6 +123,13 @@ export async function createExam(formData: z.infer<typeof createExamSchema>) {
         },
       },
       include: {
+        classroom: true,
+        _count: {
+          select: {
+            questions: true,
+            attempts: true,
+          },
+        },
         questions: {
           include: {
             expectedConcepts: true,
@@ -129,6 +146,8 @@ export async function createExam(formData: z.infer<typeof createExamSchema>) {
       entityId: exam.id,
       details: { title: exam.title, classroomId: exam.classroomId },
     });
+
+    revalidateExamViews(exam.id);
 
     return exam;
   } else {
@@ -270,6 +289,8 @@ export async function updateExamStatus(id: string, status: 'DRAFT' | 'PUBLISHED'
       details: { newStatus: status },
     });
 
+    revalidateExamViews(id);
+
     return updated;
   } else {
     if (process.env.NODE_ENV === 'production') {
@@ -302,6 +323,8 @@ export async function deleteExam(id: string) {
       entityType: 'EXAM',
       entityId: id,
     });
+
+    revalidateExamViews();
 
     return { success: true };
   } else {

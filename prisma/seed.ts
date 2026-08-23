@@ -42,7 +42,17 @@ async function main() {
   });
 
   // 4. Classroom
-  const classroom = await prisma.classroom.create({
+  const existingClassroom = await prisma.classroom.findFirst({
+    where: {
+      teacherId: teacher.id,
+      schoolId: school.id,
+      name: '8-A Fen Bilimleri',
+      grade: '8',
+      branch: 'A',
+      academicYear: '2025-2026',
+    },
+  });
+  const classroom = existingClassroom || await prisma.classroom.create({
     data: {
       teacherId: teacher.id,
       schoolId: school.id,
@@ -65,8 +75,18 @@ async function main() {
   ];
 
   for (const s of students) {
-    await prisma.studentRoster.create({
-      data: {
+    await prisma.studentRoster.upsert({
+      where: {
+        classroomId_schoolNumber: {
+          classroomId: classroom.id,
+          schoolNumber: s.schoolNumber,
+        },
+      },
+      update: {
+        firstName: s.firstName,
+        lastName: s.lastName,
+      },
+      create: {
         classroomId: classroom.id,
         schoolNumber: s.schoolNumber,
         firstName: s.firstName,

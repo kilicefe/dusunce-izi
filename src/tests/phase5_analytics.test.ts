@@ -26,11 +26,60 @@ import {
   exportTeacherDataCSV,
   exportAnonymizedResearchDataCSV,
   exportDataDictionary,
+  isAttemptCompletedForAnalytics,
+  isTeacherApprovedForAnalytics,
+  summarizeApprovedResponsesForCsv,
 } from '../lib/analyticsService';
 
 describe('Phase 5: Analytics, Resolution Engine & Reporting Tests', () => {
   beforeEach(() => {
     seedInitialData();
+  });
+
+  it('counts a submitted attempt after processing changes its workflow status', () => {
+    expect(isAttemptCompletedForAnalytics({ submittedAt: new Date(), status: 'NEEDS_TEACHER_REVIEW' } as any)).toBe(true);
+    expect(isAttemptCompletedForAnalytics({ submittedAt: null, status: 'IN_PROGRESS' } as any)).toBe(false);
+  });
+
+  it('only treats explicit teacher approvals as reviewed analytics data', () => {
+    expect(isTeacherApprovedForAnalytics({ status: 'APPROVED' })).toBe(true);
+    expect(isTeacherApprovedForAnalytics({ status: 'APPROVED_WITH_CHANGES' })).toBe(true);
+    expect(isTeacherApprovedForAnalytics({ status: 'PENDING' })).toBe(false);
+  });
+
+  it('exports the average of all approved responses and only detected misconceptions', () => {
+    const summary = summarizeApprovedResponsesForCsv([
+      {
+        teacherReviews: [{
+          status: 'APPROVED',
+          aiAnalysis: {
+            analysisJson: {
+              conceptualUnderstanding: {
+                overallLevel: { score: 4 },
+                misconceptions: [
+                  { code: 'MIS-NO', status: 'NOT_PRESENT' },
+                  { code: 'MIS-YES', status: 'POSSIBLE' },
+                ],
+              },
+            },
+          },
+        }],
+      },
+      {
+        teacherReviews: [{
+          status: 'APPROVED_WITH_CHANGES',
+          editedJson: {
+            conceptualUnderstanding: {
+              overallLevel: { score: 2 },
+              misconceptions: [{ code: 'MIS-YES', status: 'CONFIRMED_BY_EVIDENCE' }],
+            },
+          },
+        }],
+      },
+      { teacherReviews: [{ status: 'PENDING' }] },
+    ]);
+
+    expect(summary).toEqual({ averageScore: 3, misconceptionCodes: ['MIS-YES'] });
   });
 
   it('1. Source of Truth Priority: Teacher-approved review overrides provisional AI analysis', () => {

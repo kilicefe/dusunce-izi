@@ -18,6 +18,54 @@ import {
 } from '../types/database';
 import { QualitativeAnalysisOutput } from './zodSchemas';
 
+export function isAttemptCompletedForAnalytics(attempt: {
+  submittedAt?: Date | string | null;
+}): boolean {
+  return Boolean(attempt.submittedAt);
+}
+
+export function isTeacherApprovedForAnalytics(review: {
+  status?: string | null;
+} | null | undefined): boolean {
+  return review?.status === 'APPROVED' || review?.status === 'APPROVED_WITH_CHANGES';
+}
+
+export function summarizeApprovedResponsesForCsv(responses: Array<{
+  teacherReviews?: Array<{
+    status?: string | null;
+    editedJson?: any;
+    aiAnalysis?: { analysisJson?: any } | null;
+  }>;
+}>): { averageScore: number | '-'; misconceptionCodes: string[] } {
+  const scores: number[] = [];
+  const misconceptionCodes = new Set<string>();
+
+  for (const response of responses) {
+    const review = response.teacherReviews?.[0];
+    if (!isTeacherApprovedForAnalytics(review)) continue;
+    const analysis = review?.editedJson || review?.aiAnalysis?.analysisJson;
+    const score = analysis?.conceptualUnderstanding?.overallLevel?.score;
+    if (typeof score === 'number') scores.push(score);
+
+    for (const misconception of analysis?.conceptualUnderstanding?.misconceptions || []) {
+      if (
+        (misconception.status === 'CONFIRMED_BY_EVIDENCE' ||
+          misconception.status === 'POSSIBLE') &&
+        misconception.code
+      ) {
+        misconceptionCodes.add(misconception.code);
+      }
+    }
+  }
+
+  return {
+    averageScore: scores.length
+      ? Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(2))
+      : '-',
+    misconceptionCodes: [...misconceptionCodes].sort(),
+  };
+}
+
 // Filter options for analytics queries
 export interface AnalyticsFilters {
   classroomId?: string;
