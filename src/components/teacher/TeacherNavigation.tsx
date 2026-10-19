@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 import { usePathname } from 'next/navigation';
 import {
   FileText,

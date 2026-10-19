@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { getClassroom, archiveClassroom, restoreClassroom } from '@/app/actions/classroomActions';
 import { addStudentToRoster, previewAndImportCSV } from '@/app/actions/rosterActions';
 import { Users, UserPlus, Upload, ArrowLeft, Archive, RefreshCw, CheckCircle, AlertTriangle, FileSpreadsheet } from 'lucide-react';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 
 export default function ClassroomDetailClient({ id }: { id: string }) {
   const [classroom, setClassroom] = useState<any>(null);
