@@ -1,5 +1,5 @@
 import { listClassrooms } from '@/app/actions/classroomActions';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 import { Users, Plus, Archive, RefreshCw, FolderArchive, ArrowRight } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';

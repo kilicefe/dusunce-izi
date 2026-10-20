@@ -9,6 +9,7 @@ import {
   requiresGoogleAuthConfig,
 } from '@/lib/authEnvironment';
 import { Role } from '@prisma/client';
+import { cache } from 'react';
 
 declare module 'next-auth' {
   interface Session {
@@ -144,10 +145,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 });
 
-export async function getCurrentUser() {
+// Deduplicate layout/page/action reads during one Server Component render only.
+// React clears this cache for every request; no session or role is cached globally.
+// Server actions still call requireTeacher/requireAdmin themselves.
+export const getCurrentUser = cache(async () => {
   const session = await auth();
   return session?.user || null;
-}
+});
 
 export async function requireUser() {
   const user = await getCurrentUser();

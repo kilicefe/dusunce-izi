@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 import {
   ArrowLeft,
   CheckCircle2,

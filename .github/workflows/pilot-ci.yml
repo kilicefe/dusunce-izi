@@ -70,6 +70,15 @@ jobs:
       - name: Browser E2E
         run: npx playwright test --reporter=line
 
+      - name: Upload synthetic navigation screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-screenshots
+          path: test-results/**/navigation-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

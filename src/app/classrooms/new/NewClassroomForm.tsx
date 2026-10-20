@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClassroom } from '@/app/actions/classroomActions';
 import { ArrowLeft, PlusCircle } from 'lucide-react';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 
 export default function NewClassroomForm() {
   const router = useRouter();

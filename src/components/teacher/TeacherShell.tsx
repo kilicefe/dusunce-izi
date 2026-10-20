@@ -1,6 +1,6 @@
 import { Role } from '@prisma/client';
 import { LogOut, School } from 'lucide-react';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 import { redirect } from 'next/navigation';
 import { getCurrentUser, signOut } from '@/lib/auth';
 import { TeacherNavigation } from './TeacherNavigation';

@@ -1,6 +1,6 @@
 import { requireTeacher } from '@/lib/auth';
 import { listClassrooms } from '@/app/actions/classroomActions';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 import { Users, Plus, CheckCircle2, Info, ArrowRight, BookOpen, Eye, BarChart2 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';

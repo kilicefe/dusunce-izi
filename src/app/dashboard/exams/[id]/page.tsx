@@ -1,6 +1,6 @@
 import { requireTeacher } from '@/lib/auth';
 import { getExam } from '@/app/actions/examActions';
-import Link from 'next/link';
+import { TeacherLink as Link } from '@/components/teacher/TeacherLink';
 import {
   ArrowLeft,
   Eye,
