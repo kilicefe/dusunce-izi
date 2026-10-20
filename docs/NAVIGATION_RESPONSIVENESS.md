@@ -22,13 +22,51 @@
 
 Değişiklikler [taslak PR #2](https://github.com/kilicefe/dusunce-izi/pull/2) içinde, güncel `codex/pilot-hardening` dalının üzerine yerleştirildi. O daldaki medya güvenliği düzeltmeleri korunmuştur.
 
+### 20 Ekim 2026: izole Preview ve gerçek Google oturumu
+
+19 Ekim'deki eksik Google yapılandırması yalnız `codex/navigation-feedback`
+Preview dalı için tamamlandı. Ayrı Supabase veritabanı, ayrı Google OAuth
+istemcisi ve dala özel değişkenler kullanıldı; üretim sırları/verileri
+kopyalanmadı. Kurulum, migration geçmişi, rol yetkileri ve kalan bağımlılıklar
+[PREVIEW_TEST_ENVIRONMENT.md](PREVIEW_TEST_ENVIRONMENT.md) içinde kayıtlıdır.
+
+- [Preview adresi](https://dusunce-izi-git-codex-navigation-feedback-kilicefes-projects.vercel.app),
+  deployment `dpl_Ee69xhPJk8sn6eYRNjPPqmhVAzu5`, **Ready**. Bu kabul turunda
+  uygulama kodu `b82601a` durumundaydı; auth yaklaşımı değiştirilmedi ve
+  `ENABLE_TEST_AUTH=false` kaldı.
+- Gerçek Google girişi öğretmen gösterge paneline ulaştı. Veritabanında Google
+  hesap bağlantısı oluştu; bu kontrol CI test kimliğiyle yapılmadı.
+- Tarayıcıdan `QA Önizleme 8-A • 20 Ekim` sınıfı ve `QA20261020` numaralı
+  `Deneme Öğrencisi` eklendi. Formlarda `Kaydediliyor...` / `Ekleniyor...`
+  bekleme durumu görüldü, kayıtlar sayfalarda doğrulandı.
+- Sınıftan logo bağlantısıyla ana sayfaya, oradan sınavlara gidildi.
+  `Gösterge paneli yükleniyor…` ve `Sınav bilgileri yükleniyor…` durumları görüldü.
+- `QA Gezinme Sınavı • 20 Ekim` adlı taslak oluşturuldu; sınav yönetimi,
+  henüz yanıt olmayan inceleme ekranı, sınav detayına dönüş ve analitik ekranı
+  açıldı. Sınav yayımlanmadı; gerçek öğrenciye bağlantı gönderilmedi.
+- Sınav detayı kontrolünde tarayıcı hata/uyarı günlükleri boştu. O anda
+  sorgulanan Preview hata günlükleri de kayıt döndürmedi; bu sonuç tüm özelliklerin
+  hatasız çalıştığı veya bütün isteklerin tarandığı iddiası değildir.
+- Gerçek oturumda mobil analitik boyutuna geçildi, ancak son görsel kontrol,
+  mobil ana sayfaya dönüş ve çıkış/yeniden giriş turu tamamlanmadan uygulama içi
+  tarayıcı erişimi kayboldu. Yeni Chrome oturumu Vercel girişinde bekliyor.
+  Bu adımlar **manuel kabul bekliyor**; CI'deki başarılı mobil testlerle
+  karıştırılmamalıdır. Koruma veya kimlik doğrulama gevşetilmedi.
+
+Ek bulgu: yeni sınıf formu akademik yılı hâlâ `2025-2026` ile başlatıyor.
+Testte `2026-2027` elle seçildi. Otomatik/güncel akademik yıl varsayılanı bu
+gezinme paketinde düzeltilmedi ve ayrı UX işi olarak kalır.
+
 ## Yayına alma ve kabul kontrolü
 
-Veritabanı migrasyonu, yeni anahtar veya auth/CI yapılandırması değişikliği gerekmez. Bu değişiklikler henüz canlıya gönderilmedi.
+Gezinme kodunun mevcut üretim ortamına alınması için veritabanı migrasyonu,
+yeni anahtar veya auth/CI yaklaşımı değişikliği gerekmez. Yeni ve boş Preview
+veritabanının kurulumu için mevcut migration'lar ayrıca uygulanmıştır; bu iki
+işlem birbirine karıştırılmamalıdır. Değişiklikler henüz canlıya gönderilmedi.
 
 1. PR #2'nin en güncel CI ve Vercel durumunu kontrol et. Kod ve genişletilmiş test paketi `c2fb2b0` üzerinde geçti; sonraki doküman değişiklikleri de CI'yi yeniden tetikler.
-2. Manuel kabul için önce ayrı test verileri kullanan bir önizlemeye Google OAuth yapılandır. Gerekli callback adresini açıkça onaylat; üretim sırlarını/verisini önizlemeye gelişigüzel kopyalama. Önizlemeyi üretime yükselterek veya test kimliğini üretimde açarak bu sınırı atlama.
-3. Bu ortamda ana sayfa → sınıflar → sınıf detayı → sınavlar → inceleme/analitik → ana sayfa gezintisini, gerçek Google oturumunu ve farklı öğretmenlerin veri ayrımını manuel kontrol et. Safari/Firefox ve yeni sekmede açma henüz bu turda denenmedi.
+2. Manuel kabul için oluşturulmuş izole Preview ortamını kullan. Google callback ve yeni sırların yalnız Preview'a yazılması kullanıcı tarafından onaylandı ve uygulandı. Üretim sırlarını/verisini önizlemeye kopyalama. Önizlemeyi üretime yükselterek veya test kimliğini üretimde açarak bu sınırı atlama.
+3. Yukarıdaki tamamlanmış masaüstü kabul turuna ek olarak gerçek Google oturumunda son mobil kontrolü, çıkış/yeniden girişi ve farklı öğretmenlerin veri ayrımını tamamla. Safari/Firefox ve yeni sekmede açma henüz bu turda denenmedi.
 4. Onaydan sonra normal PR/üretim dağıtım sürecini kullan; veritabanı migrasyonu gerekmez. Canlıda giriş, menü, geri dönüş ve gösterge temizlenmesi için kısa bir salt okunur kontrol yap. Sorunda önceki Ready deployment'a dön; bu paket için veri geri alma işlemi gerekmez.
 
 Bu paket algılanan beklemeyi iyileştirir ve tekrarlı oturum okumalarını azaltır; üretimde belirli bir milisaniye veya yüzdelik hızlanma ölçülmüş değildir. Sunucu/veritabanı bölgesi, soğuk başlangıç ve sorgu süreleri ayrıca ölçülmelidir. Önceki işlev/güvenlik incelemesindeki diğer bulgular bu paketle çözülmüş sayılmaz.
