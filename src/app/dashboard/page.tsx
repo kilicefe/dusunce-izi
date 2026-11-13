@@ -128,6 +128,17 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* Four-tier Mevsimler Tanılama */}
+      <div className="bg-gradient-to-r from-cyan-900 to-blue-800 rounded-2xl p-6 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="font-bold text-xl">Mevsimler · Dört Aşamalı Kavramsal Tanılama</h2>
+          <p className="text-cyan-100 text-sm mt-2">Düşünce İzi ve EduAnalytics entegrasyonu: öğrencilerin cevap, gerekçe ve ayrı güven düzeylerinden kavram yanılgısı analizi.</p>
+        </div>
+        <Link href="/dashboard/diagnostics" className="bg-white text-cyan-900 px-5 py-3 rounded-xl font-bold text-sm shrink-0">
+          Tanılama Sınavını Aç →
+        </Link>
+      </div>
+
       {/* Classroom List Preview */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center">
