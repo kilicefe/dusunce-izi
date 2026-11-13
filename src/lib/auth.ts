@@ -37,14 +37,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || '',
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      // Only verified Google addresses, additionally checked against an existing teacher account.
+      allowDangerousEmailAccountLinking: true,
     }),
 
   ],
   callbacks: {
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       // Only pre-approved teacher/admin accounts can enter. Never auto-authorize
       // an arbitrary Google account as a teacher based on Prisma's default role.
       if (account?.provider !== 'google' || !user.email) return false;
+      const googleProfile = profile as { email_verified?: boolean; email?: string } | undefined;
+      if (googleProfile?.email_verified !== true || googleProfile.email?.toLowerCase() !== user.email.toLowerCase()) return false;
       const existing = await prisma.user.findUnique({
         where: { email: user.email.trim().toLowerCase() },
         select: { role: true },
