@@ -1,4 +1,5 @@
 import { requireUser } from '@/lib/auth';
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { School, Users, ShieldAlert, LogOut, LayoutDashboard, FileText } from 'lucide-react';
 import { signOut } from '@/lib/auth';
@@ -11,7 +12,8 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const user = await requireUser();
+  const user = await requireUser().catch(() => null);
+  if (!user) redirect('/sign-in');
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
