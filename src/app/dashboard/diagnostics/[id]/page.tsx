@@ -8,7 +8,7 @@ type Student={student:{firstName:string;lastName:string;schoolNumber:string};sub
 type Data={exam:{title:string;classroom:string;shortCode:string};students:Student[];summary:{studentCount:number;averageScore:number|null;misconceptions:{code:string;label:string;count:number;percentage:number}[]}};
 function csvCell(x:unknown){return '"'+String(x??'').replace(/"/g,'""')+'"'}
 export default function TeacherAnalysisPage(){
- const params=useParams();const id=String(params.id||'');
+ const params=useParams();const id=String(params?.id||'');
  const [data,setData]=useState<Data|null>(null),[error,setError]=useState(''),[selected,setSelected]=useState<number|null>(null);
  useEffect(()=>{fetch('/api/diagnostics/seasons/teacher?examId='+encodeURIComponent(id),{cache:'no-store'}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error||'Analiz yüklenemedi');setData(d)}).catch(e=>setError(e.message))},[id]);
  function exportCsv(){if(!data)return;const lines=[['No','Ad','Soyad','Puan','Doğru sonuç','Doğru gerekçe','Çift doğru','Güvenli kavrama','Yanılgı kodları'].map(csvCell).join(';'),...data.students.map(s=>[s.student.schoolNumber,s.student.firstName,s.student.lastName,s.analysis.score,s.analysis.answerCorrect,s.analysis.reasonCorrect,s.analysis.jointCorrect,s.analysis.scientific,Object.keys(s.analysis.misconceptionCounts).join(', ')].map(csvCell).join(';'))];const blob=new Blob(['\uFEFF'+lines.join('\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='mevsimler-kavramsal-analiz.csv';a.click();URL.revokeObjectURL(url)}
