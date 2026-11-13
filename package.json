@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "node dev.js",
-    "build": "prisma generate && next build",
+    "build": "npm run test:diagnostic && prisma generate && next build",
     "start": "next start -p 3000",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "clean": "rm -rf .next dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:diagnostic": "vitest run src/lib/seasonsDiagnostic.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
