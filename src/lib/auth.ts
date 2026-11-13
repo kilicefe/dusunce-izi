@@ -1,6 +1,5 @@
 import NextAuth, { type DefaultSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
-import CredentialsProvider from 'next-auth/providers/credentials';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import prisma from '@/lib/prisma';
 import { Role } from '@prisma/client';
@@ -42,6 +41,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   ],
   callbacks: {
+    async signIn({ user, account }) {
+      // Only pre-approved teacher/admin accounts can enter. Never auto-authorize
+      // an arbitrary Google account as a teacher based on Prisma's default role.
+      if (account?.provider !== 'google' || !user.email) return false;
+      const existing = await prisma.user.findUnique({
+        where: { email: user.email.trim().toLowerCase() },
+        select: { role: true },
+      });
+      return Boolean(existing && (existing.role === Role.TEACHER || existing.role === Role.ADMIN));
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
@@ -92,10 +101,17 @@ export async function getCurrentUser() {
 
 export async function requireUser() {
   const user = await getCurrentUser();
-  if (!user) {
+  if (!user?.id || !user.email) {
     throw new Error('UNAUTHORIZED: Authentication required');
   }
-  return user;
+  const existing = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { id: true, email: true, role: true },
+  });
+  if (!existing || existing.email?.toLowerCase() !== user.email.toLowerCase()) {
+    throw new Error('UNAUTHORIZED: Session is no longer valid');
+  }
+  return { ...user, role: existing.role };
 }
 
 export async function requireTeacher() {
