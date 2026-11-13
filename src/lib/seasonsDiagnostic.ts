@@ -155,7 +155,7 @@ export function publicSeasonsItems(seed='student') {
 }
 export function scoreSeasons(responses:Record<string,TierResponse>) {
  const items=SEASONS_ITEMS.map(q=>{
-  const r=responses[q.id]; if(!r) return {id:q.id,concept:q.concept,status:"missing",correctAnswer:false,correctReason:false,confidenceAnswer:0,confidenceReason:0,misconceptions:[] as string[]};
+  const r=responses[q.id]; if(!r) return {id:q.id,concept:q.concept,status:"missing",correctAnswer:false,correctReason:false,selectedAnswer:"",selectedReason:"",selectedAnswerText:"",selectedReasonText:"",confidenceAnswer:0,confidenceReason:0,misconceptions:[] as string[]};
   const correctAnswer=r.answer===q.correctAnswer,correctReason=r.reason===q.correctReason;
   const highAnswer=r.answerConfidence>=4, highReason=r.reasonConfidence>=4;
   const status=correctAnswer&&correctReason?(highAnswer&&highReason?"scientific":"tentative"):
@@ -166,7 +166,7 @@ export function scoreSeasons(responses:Record<string,TierResponse>) {
    ...(highAnswer ? [q.choices.find(c=>c.id===r.answer)?.misconception] : []),
    ...(highReason ? [q.reasons.find(c=>c.id===r.reason)?.misconception] : [])
   ].filter((v):v is string=>Boolean(v));
-  return {id:q.id,concept:q.concept,status,correctAnswer,correctReason,confidenceAnswer:r.answerConfidence,confidenceReason:r.reasonConfidence,misconceptions:[...new Set(misconceptions)]};
+  return {id:q.id,concept:q.concept,status,correctAnswer,correctReason,selectedAnswer:r.answer,selectedReason:r.reason,selectedAnswerText:q.choices.find(c=>c.id===r.answer)?.text||"",selectedReasonText:q.reasons.find(c=>c.id===r.reason)?.text||"",confidenceAnswer:r.answerConfidence,confidenceReason:r.reasonConfidence,misconceptions:[...new Set(misconceptions)]};
  });
  const answerCorrect=items.filter(x=>x.correctAnswer).length;
  const reasonCorrect=items.filter(x=>x.correctReason).length;
