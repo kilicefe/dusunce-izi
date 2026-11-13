@@ -36,6 +36,7 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
             roster: true,
           },
         },
+        questions: { select: { questionType: true } },
       },
     });
 
@@ -45,6 +46,12 @@ export async function loginStudentForExam(shortCode: string, schoolNumber: strin
 
     if (exam.status !== 'PUBLISHED') {
       throw new Error('EXAM_NOT_ACTIVE: Bu sınav henüz öğrenci erişimine açılmamıştır');
+    }
+
+    // Four-tier diagnostic exams must only run via /diagnostic/[code].
+    // The legacy exam endpoint serializes full Question objects (including answer keys).
+    if (exam.questions.some((question) => question.questionType === 'FOUR_TIER')) {
+      throw new Error('USE_DIAGNOSTIC_PORTAL: Bu sınava öğretmeninizin paylaştığı tanılama bağlantısından giriniz.');
     }
 
     const student = exam.classroom.roster.find(
@@ -155,6 +162,9 @@ export async function getStudentAttemptData(attemptToken: string) {
     });
 
     if (!attempt) throw new Error('NOT_FOUND: Sınav oturumu bulunamadı');
+    if (attempt.exam.questions.some((question) => question.questionType === 'FOUR_TIER')) {
+      throw new Error('FORBIDDEN: Kavramsal tanılama sınavı eski portalda görüntülenemez.');
+    }
 
     return attempt;
   } else {
