@@ -1,3 +1,4 @@
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { publicSeasonsItems, scoreSeasons, SEASONS_INSTRUMENT_VERSION, SEASONS_ITEMS, type TierResponse } from '@/lib/seasonsDiagnostic';
@@ -47,14 +48,26 @@ export async function POST(request:NextRequest){
   if(questionIds.length!==SEASONS_ITEMS.length)return NextResponse.json({error:'Sınav soru kurulumu tamamlanmamış.'},{status:409});
   const scores=scoreSeasons(responses);
   await prisma.$transaction(async tx=>{
-   const previous=await tx.examAttempt.findUnique({where:{examId_studentRosterId:{examId:exam.id,studentRosterId:student.id}}});
+   const previous=await tx.examAttempt.findUnique({
+     where:{examId_studentRosterId:{examId:exam.id,studentRosterId:student.id}},
+     select:{id:true},
+   });
    if(previous){throw new Error('ALREADY_SUBMITTED');}
-   const attempt=await tx.examAttempt.create({data:{examId:exam.id,studentRosterId:student.id,status:'SUBMITTED',submittedAt:new Date()}});
+   // Production EduAnalytics schema intentionally stores only an attempt token hash.
+   // Do not add a plaintext attemptToken column or weaken the existing database.
+   const attemptId=randomUUID();
+   const attemptTokenHash=createHash('sha256').update(randomBytes(32)).digest('hex');
+   await tx.$executeRaw`
+     INSERT INTO "ExamAttempt"
+       ("id","examId","studentRosterId","attemptTokenHash","status","startedAt","submittedAt","timeSpentSec")
+     VALUES
+       (${attemptId},${exam.id},${student.id},${attemptTokenHash},'SUBMITTED'::"AttemptStatus",CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,0)
+   `;
    for(const q of questionIds){
     const id=q.sourceInfo||'';
     if(!responses[id])throw new Error('QUESTION_MISMATCH');
     await tx.studentResponse.create({data:{
-     attemptId:attempt.id,questionId:q.id,
+     attemptId,questionId:q.id,
      textResponse:{create:{content:JSON.stringify({version:SEASONS_INSTRUMENT_VERSION,response:responses[id],itemScore:scores.items.find(x=>x.id===id)}),charCount:0}}
     }});
    }
