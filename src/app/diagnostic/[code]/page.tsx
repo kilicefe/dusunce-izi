@@ -5,7 +5,7 @@ type Item={id:string;concept:string;prompt:string;choices:{id:string;text:string
 type Response={answer:string;answerConfidence:number;reason:string;reasonConfidence:number};
 const empty=():Response=>({answer:'',answerConfidence:0,reason:'',reasonConfidence:0});
 export default function SeasonsStudentPage(){
- const params=useParams();const code=String(params.code||'');
+ const params=useParams();const code=String(params?.code||'');
  const [items,setItems]=useState<Item[]>([]);const [title,setTitle]=useState('');
  const [loading,setLoading]=useState(true);const [error,setError]=useState('');
  const [responses,setResponses]=useState<Record<string,Response>>({});
