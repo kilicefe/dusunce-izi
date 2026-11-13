@@ -145,10 +145,12 @@ reasons:[
 {id:"E",text:"Küçük eğiklik yıldız ışınlarını her yerde dik hâle getirir.",misconception:"TILT_MAGNITUDE"},
 {id:"F",text:"Işınların düşme açısı hiçbir gezegende yıl boyunca değişmez.",misconception:"TILT_MAGNITUDE"}],correctAnswer:"A",correctReason:"A"}
 ];
-export function publicSeasonsItems() {
+function stableRank(key:string){let h=2166136261;for(let i=0;i<key.length;i++){h=Math.imul(h^key.charCodeAt(i),16777619);}return h>>>0;}
+export function publicSeasonsItems(seed='student') {
  return SEASONS_ITEMS.map(({id,concept,prompt,choices,reasons})=>({
-  id,concept,prompt,choices:choices.map(({id,text})=>({id,text})),
-  reasons:reasons.map(({id,text})=>({id,text}))
+  id,concept,prompt,
+  choices:choices.map(({id,text})=>({id,text})).sort((a,b)=>stableRank(seed+id+'choice'+a.id)-stableRank(seed+id+'choice'+b.id)),
+  reasons:reasons.map(({id,text})=>({id,text})).sort((a,b)=>stableRank(seed+id+'reason'+a.id)-stableRank(seed+id+'reason'+b.id))
  }));
 }
 export function scoreSeasons(responses:Record<string,TierResponse>) {
