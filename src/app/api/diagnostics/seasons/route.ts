@@ -14,7 +14,7 @@ async function publicExam(code:string){
 export async function GET(request:NextRequest){
  const code=request.nextUrl.searchParams.get('code')||'';
  const exam=code?await publicExam(code):null; if(!exam)return denied();
- return NextResponse.json({exam:{title:exam.title,shortCode:exam.shortCode},version:SEASONS_INSTRUMENT_VERSION,questions:publicSeasonsItems()},{headers:{'Cache-Control':'no-store'}});
+ return NextResponse.json({exam:{title:exam.title,shortCode:exam.shortCode},version:SEASONS_INSTRUMENT_VERSION,questions:publicSeasonsItems(code)},{headers:{'Cache-Control':'no-store'}});
 }
 export async function POST(request:NextRequest){
  try{
